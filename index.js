@@ -1,4 +1,3 @@
-
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
@@ -8,16 +7,15 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const JSZip = require('jszip');
-
-// ★追加：パス操作のための準備
 import { fileURLToPath } from 'url';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
-// --- 設定などはそのまま ---
+// 設定
 const LOG_DIR = 'secret_logs';
 const ARCHIVE_DIR = path.join(LOG_DIR, 'pdf_archive');
 const LOG_FILE = path.join(LOG_DIR, 'history.json');
@@ -51,51 +49,52 @@ function recordHistory(inputPath, originalName) {
     } catch (e) { console.error("Log Error:", e.message); }
 }
 
-// ★ここが重要！Web画面を表示する設定
-// publicフォルダの中身（HTMLなど）をそのまま公開する
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ★ルートURL (/) にアクセスが来たら index.html を返す
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// --- 変換API (変更なし) ---
 app.post('/convert', upload.single('pdf'), async (req, res) => {
     if (!req.file) return res.status(400).send('No file uploaded.');
     
-    // (中略：既存の変換コードと同じ)
     const inputPdfPath = req.file.path;
     const originalName = req.file.originalname;
-    // ...以前のコードのまま...
-    
+    const outDir = path.dirname(inputPdfPath);
+
     try {
         console.log(`📥 受信: ${originalName}`);
         try { execSync('fc-cache -fv', { stdio: 'ignore' }); } catch(e) {}
-        const outDir = path.dirname(inputPdfPath);
         
-        // 変換コマンド
+        // 1. 変換実行
         execSync(`soffice --headless --infilter="impress_pdf_import" --convert-to pptx:"Impress Office Open XML" "${inputPdfPath}" --outdir "${outDir}"`);
 
-        // ファイル特定ロジック（簡易版：inputPdfPath + .pptx と仮定）
-        // multerは拡張子なしで保存するので、LibreOfficeはそこに.pptxをつける
         const outputPptPath = inputPdfPath + '.pptx';
 
         if (fs.existsSync(outputPptPath)) {
-            // フォント微調整
+            // 2. XML編集（フォントサイズ縮小 ＆ Meiryo UI 強制化）
             const data = fs.readFileSync(outputPptPath);
             const zip = await JSZip.loadAsync(data);
-            const slideFiles = Object.keys(zip.files).filter(path => path.startsWith("ppt/slides/slide") && path.endsWith(".xml"));
+            
+            // スライド、スライドマスター、テーマファイルを全て対象にする
+            const targetFiles = Object.keys(zip.files).filter(path => 
+                path.endsWith(".xml") && (path.includes("slides/slide") || path.includes("theme/theme") || path.includes("slideMasters"))
+            );
 
-            for (const filename of slideFiles) {
+            for (const filename of targetFiles) {
                 let xmlContent = await zip.file(filename).async("string");
+
+                // (A) フォントサイズを1段階小さくする
                 xmlContent = xmlContent.replace(/sz="(\d+)"/g, (match, sizeVal) => {
                     const currentPt = parseInt(sizeVal, 10) / 100;
                     const newPt = getOneSizeSmaller(currentPt);
                     return `sz="${Math.round(newPt * 100)}"`;
                 });
+
+                // (B) ★追加機能：フォントを全て "Meiryo UI" に強制置換
+                // typeface="任意のフォント名" を typeface="Meiryo UI" に書き換え
+                xmlContent = xmlContent.replace(/typeface="[^"]*"/g, 'typeface="Meiryo UI"');
+
                 zip.file(filename, xmlContent);
             }
+
             const content = await zip.generateAsync({ type: "nodebuffer" });
             fs.writeFileSync(outputPptPath, content);
 
@@ -112,7 +111,7 @@ app.post('/convert', upload.single('pdf'), async (req, res) => {
         }
     } catch (error) {
         console.error("Error:", error);
-        res.status(500).send('Conversion failed. Please try again.');
+        res.status(500).send('Conversion failed.');
         if (fs.existsSync(inputPdfPath)) fs.unlinkSync(inputPdfPath);
     }
 });

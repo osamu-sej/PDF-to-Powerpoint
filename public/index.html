@@ -3,23 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF to PPTX Converter</title>
+    <title>PDF to PPTX Pro</title>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        /* 全体の設定 */
         :root {
-            --primary-color: #2563eb;
-            --primary-hover: #1d4ed8;
-            --bg-color: #f3f4f6;
-            --card-bg: #ffffff;
-            --text-main: #1f2937;
-            --text-sub: #6b7280;
+            --primary: #2563eb;
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --text: #1f2937;
         }
-
         body {
             font-family: 'Noto Sans JP', sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-main);
+            background-color: var(--bg);
+            color: var(--text);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -27,86 +23,41 @@
             margin: 0;
             padding: 20px;
         }
-
-        /* カードデザイン */
         .container {
-            background: var(--card-bg);
+            background: var(--card);
             width: 100%;
-            max-width: 480px;
+            max-width: 500px;
             padding: 2.5rem;
             border-radius: 20px;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
             text-align: center;
-            box-sizing: border-box;
         }
+        h1 { margin: 0 0 0.5rem 0; color: #111; }
+        p.subtitle { color: #666; margin-bottom: 2rem; font-size: 0.9rem; }
 
-        h1 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin: 0 0 0.5rem 0;
-            color: #111827;
-        }
-
-        p.subtitle {
-            color: var(--text-sub);
-            font-size: 0.9rem;
-            margin: 0 0 2rem 0;
-        }
-
-        /* アップロードエリア（崩れ防止版） */
+        /* アップロードエリア */
         .upload-area {
             border: 2px dashed #e5e7eb;
             border-radius: 12px;
+            padding: 2rem;
             cursor: pointer;
-            transition: all 0.3s ease;
-            background-color: #f9fafb;
-            position: relative;
-            
-            /* レイアウト崩れを防ぐFlexbox設定 */
+            background: #f9fafb;
+            transition: 0.3s;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            min-height: 200px;
-            padding: 20px;
-            gap: 15px;
+            gap: 10px;
         }
-
         .upload-area:hover, .upload-area.dragover {
-            border-color: var(--primary-color);
-            background-color: #eff6ff;
+            border-color: var(--primary);
+            background: #eff6ff;
         }
-
-        .icon {
-            font-size: 3.5rem;
-            color: #9ca3af;
-            display: block;
-            line-height: 1;
-        }
-        
-        .upload-area.dragover .icon {
-            color: var(--primary-color);
-            transform: scale(1.1);
-        }
-
-        /* テキスト調整 */
-        #dropText {
-            display: block;
-            line-height: 1.6;
-            color: var(--text-sub);
-        }
-
-        .file-info {
-            font-size: 0.95rem;
-            font-weight: bold;
-            color: var(--primary-color);
-            display: none;
-            word-break: break-all;
-        }
+        .icon { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
+        .file-info { font-weight: bold; color: var(--primary); display: none; }
 
         /* ボタン */
         .btn-convert {
-            background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+            background: var(--primary);
             color: white;
             border: none;
             padding: 1rem;
@@ -116,80 +67,86 @@
             font-weight: bold;
             cursor: pointer;
             margin-top: 1.5rem;
-            box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
-            transition: all 0.2s;
-            position: relative;
+            transition: 0.2s;
+        }
+        .btn-convert:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* --- 新しいプログレスバーのデザイン --- */
+        .progress-container {
+            margin-top: 20px;
+            display: none; /* 最初は隠す */
+            text-align: left;
+        }
+        .progress-bar-bg {
+            width: 100%;
+            height: 10px;
+            background-color: #e5e7eb;
+            border-radius: 5px;
             overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            margin-bottom: 8px;
         }
-
-        .btn-convert:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 8px rgba(37, 99, 235, 0.3);
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #2563eb, #3b82f6);
+            border-radius: 5px;
+            transition: width 0.3s ease-out;
         }
-
-        .btn-convert:disabled {
-            background: #9ca3af;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        /* ローディングアニメーション */
-        .spinner {
-            display: inline-block;
-            width: 1.2rem;
-            height: 1.2rem;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-            margin-right: 8px;
-            display: none;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* ステータスメッセージ */
-        #status-message {
-            margin-top: 1rem;
+        .status-text {
             font-size: 0.9rem;
-            min-height: 1.5rem;
             font-weight: bold;
+            color: #374151;
+            display: flex;
+            justify-content: space-between;
         }
-        .success { color: #10b981; }
-        .error { color: #ef4444; }
+        .fun-message {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 5px;
+            height: 1.2em; /* ガタつき防止 */
+        }
 
+        /* 完了時のアニメーション */
+        @keyframes pop {
+            0% { transform: scale(0.95); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .success-message {
+            color: #10b981;
+            font-weight: bold;
+            margin-top: 15px;
+            display: none;
+            animation: pop 0.3s ease-out;
+        }
     </style>
 </head>
 <body>
-
     <div class="container">
-        <h1>PDF to PPTX Converter</h1>
-        <p class="subtitle">AI技術を活用した高精度なスライド変換</p>
+        <h1>PDF to PPTX Pro</h1>
+        <p class="subtitle">Meiryo UI 最適化・AIレイアウト調整</p>
 
         <form id="convertForm">
             <label class="upload-area" id="dropZone">
                 <input type="file" name="pdf" id="fileInput" accept=".pdf" hidden>
-                <span class="icon">📄</span>
-                <span id="dropText">
-                    ここにPDFをドロップ<br>
-                    <span style="font-size:0.85em; color:#2563eb;">またはクリックして選択</span>
-                </span>
+                <span class="icon">📂</span>
+                <span id="dropText">ここにPDFをドロップ<br><small style="color:#2563eb">またはクリックして選択</small></span>
                 <div class="file-info" id="fileInfo"></div>
             </label>
 
-            <button type="submit" class="btn-convert" id="submitBtn">
-                <span class="spinner" id="loadingSpinner"></span>
-                <span id="btnText">変換してダウンロード</span>
-            </button>
+            <div class="progress-container" id="progressContainer">
+                <div class="status-text">
+                    <span id="percentText">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+                <div class="fun-message" id="funMessage">準備中...</div>
+            </div>
+
+            <button type="submit" class="btn-convert" id="submitBtn">変換してダウンロード</button>
         </form>
 
-        <div id="status-message"></div>
+        <div class="success-message" id="successMessage">🎉 ダウンロード完了！</div>
     </div>
 
     <script>
@@ -199,119 +156,127 @@
         const dropText = document.getElementById('dropText');
         const form = document.getElementById('convertForm');
         const submitBtn = document.getElementById('submitBtn');
-        const loadingSpinner = document.getElementById('loadingSpinner');
-        const btnText = document.getElementById('btnText');
-        const statusMessage = document.getElementById('status-message');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const percentText = document.getElementById('percentText');
+        const funMessage = document.getElementById('funMessage');
+        const successMessage = document.getElementById('successMessage');
 
-        // ドラッグ＆ドロップ制御
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, preventDefaults, false);
+        // ドラッグ＆ドロップ処理
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+            dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); });
         });
-
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-
-        ['dragenter', 'dragover'].forEach(eventName => {
-            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
-        });
-
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
-        });
-
+        dropZone.addEventListener('dragover', () => dropZone.style.background = '#eff6ff');
+        dropZone.addEventListener('dragleave', () => dropZone.style.background = '#f9fafb');
         dropZone.addEventListener('drop', (e) => {
-            const dt = e.dataTransfer;
-            const files = dt.files;
-            fileInput.files = files;
-            handleFiles(files);
+            dropZone.style.background = '#f9fafb';
+            fileInput.files = e.dataTransfer.files;
+            handleFile(fileInput.files[0]);
         });
+        fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
 
-        fileInput.addEventListener('change', function() {
-            handleFiles(this.files);
-        });
-
-        function handleFiles(files) {
-            if (files.length > 0) {
-                const fileName = files[0].name;
-                fileInfo.textContent = `✅ ${fileName}`;
+        function handleFile(file) {
+            if (file) {
+                fileInfo.textContent = `✅ ${file.name}`;
                 fileInfo.style.display = 'block';
                 dropText.style.display = 'none';
                 document.querySelector('.icon').style.display = 'none';
             }
         }
 
-        // 送信処理
+        // 面白いメッセージのリスト
+        const messages = [
+            "AIがPDFを読み込んでいます...",
+            "レイアウトを解析中...",
+            "フォントを Meiryo UI に統一中...",
+            "文字サイズを微調整しています...",
+            "スライドのデザインを整えています...",
+            "最終仕上げをしています...",
+            "もう少しです！"
+        ];
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (!fileInput.files.length) return alert('ファイルを選択してください');
+
+            // UIリセット
+            submitBtn.disabled = true;
+            submitBtn.style.display = 'none'; // ボタンを消してバーを出す
+            progressContainer.style.display = 'block';
+            successMessage.style.display = 'none';
             
-            if (!fileInput.files.length) {
-                setStatus('ファイルを選択してください', 'error');
-                return;
+            let progress = 0;
+            let msgIndex = 0;
+
+            // プログレスバーのアニメーション（シミュレーション）
+            const timer = setInterval(() => {
+                // 90%までは自動で進む
+                if (progress < 90) {
+                    // ランダムに少しずつ進める
+                    progress += Math.random() * 5; 
+                    if (progress > 90) progress = 90;
+                    
+                    updateProgress(progress);
+
+                    // メッセージを切り替え
+                    if (progress > (msgIndex + 1) * (90 / messages.length)) {
+                        if (msgIndex < messages.length - 1) {
+                            msgIndex++;
+                            funMessage.textContent = messages[msgIndex];
+                        }
+                    }
+                }
+            }, 500); // 0.5秒ごとに更新
+
+            function updateProgress(val) {
+                const p = Math.round(val);
+                progressBar.style.width = `${p}%`;
+                percentText.textContent = `${p}%`;
             }
 
-            setLoading(true);
-            setStatus('サーバーで変換処理中... (30秒ほどかかります)', '');
-
-            const formData = new FormData(form);
-
             try {
-                const response = await fetch('/convert', {
-                    method: 'POST',
-                    body: formData
-                });
+                const formData = new FormData(form);
+                const response = await fetch('/convert', { method: 'POST', body: formData });
+                
+                if (!response.ok) throw new Error('変換失敗');
 
-                if (!response.ok) throw new Error('変換に失敗しました');
+                // 完了したら一気に100%へ
+                clearInterval(timer);
+                updateProgress(100);
+                funMessage.textContent = "完了しました！ダウンロードを開始します。";
 
+                // ダウンロード処理
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                
-                // ★修正箇所：ファイル名の文字化け対策★
-                // サーバーからのレスポンスヘッダーを使わず、
-                // 手元のアップロードファイル名を使ってダウンロード名を決定する
                 const originalName = fileInput.files[0].name;
-                // .pdf (大文字小文字区別なし) を .pptx に置換
-                const downloadName = originalName.replace(/\.pdf$/i, '.pptx');
-
-                a.download = downloadName;
+                a.download = originalName.replace(/\.pdf$/i, '.pptx');
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
-                window.URL.revokeObjectURL(url);
 
-                setStatus('ダウンロードが完了しました！', 'success');
-
+                // 完了表示
                 setTimeout(() => {
-                    setLoading(false);
-                    setStatus('', '');
-                }, 3000);
+                    successMessage.style.display = 'block';
+                    // 3秒後にリセット
+                    setTimeout(() => {
+                        submitBtn.disabled = false;
+                        submitBtn.style.display = 'block';
+                        progressContainer.style.display = 'none';
+                        successMessage.style.display = 'none';
+                        // プログレスバーのリセット
+                        updateProgress(0);
+                        funMessage.textContent = messages[0];
+                    }, 3000);
+                }, 500);
 
-            } catch (error) {
-                console.error(error);
-                setStatus('エラーが発生しました。もう一度お試しください。', 'error');
-                setLoading(false);
+            } catch (err) {
+                clearInterval(timer);
+                alert('エラーが発生しました');
+                location.reload();
             }
         });
-
-        function setLoading(isLoading) {
-            if (isLoading) {
-                submitBtn.disabled = true;
-                loadingSpinner.style.display = 'inline-block';
-                btnText.textContent = '変換中...';
-            } else {
-                submitBtn.disabled = false;
-                loadingSpinner.style.display = 'none';
-                btnText.textContent = '変換してダウンロード';
-            }
-        }
-
-        function setStatus(msg, type) {
-            statusMessage.textContent = msg;
-            statusMessage.className = type;
-        }
     </script>
 </body>
 </html>
