@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF to PPTX Pro Converter</title>
+    <title>PDF to PPTX Converter</title>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <style>
         /* 全体の設定 */
@@ -25,42 +25,51 @@
             align-items: center;
             min-height: 100vh;
             margin: 0;
+            padding: 20px;
         }
 
         /* カードデザイン */
         .container {
             background: var(--card-bg);
-            width: 90%;
+            width: 100%;
             max-width: 480px;
             padding: 2.5rem;
             border-radius: 20px;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
             text-align: center;
-            transition: transform 0.2s;
+            box-sizing: border-box;
         }
 
         h1 {
             font-size: 1.5rem;
             font-weight: 700;
-            margin-bottom: 0.5rem;
+            margin: 0 0 0.5rem 0;
             color: #111827;
         }
 
         p.subtitle {
             color: var(--text-sub);
             font-size: 0.9rem;
-            margin-bottom: 2rem;
+            margin: 0 0 2rem 0;
         }
 
-        /* アップロードエリア */
+        /* アップロードエリア（崩れ防止版） */
         .upload-area {
             border: 2px dashed #e5e7eb;
             border-radius: 12px;
-            padding: 2rem;
             cursor: pointer;
             transition: all 0.3s ease;
             background-color: #f9fafb;
             position: relative;
+            
+            /* レイアウト崩れを防ぐFlexbox設定 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+            padding: 20px;
+            gap: 15px;
         }
 
         .upload-area:hover, .upload-area.dragover {
@@ -69,10 +78,10 @@
         }
 
         .icon {
-            font-size: 3rem;
+            font-size: 3.5rem;
             color: #9ca3af;
-            margin-bottom: 1rem;
             display: block;
+            line-height: 1;
         }
         
         .upload-area.dragover .icon {
@@ -80,12 +89,19 @@
             transform: scale(1.1);
         }
 
+        /* テキスト調整 */
+        #dropText {
+            display: block;
+            line-height: 1.6;
+            color: var(--text-sub);
+        }
+
         .file-info {
-            margin-top: 1rem;
-            font-size: 0.9rem;
+            font-size: 0.95rem;
             font-weight: bold;
             color: var(--primary-color);
-            display: none; /* 最初は隠す */
+            display: none;
+            word-break: break-all;
         }
 
         /* ボタン */
@@ -104,6 +120,9 @@
             transition: all 0.2s;
             position: relative;
             overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         .btn-convert:hover {
@@ -128,7 +147,6 @@
             border-top-color: #fff;
             animation: spin 1s ease-in-out infinite;
             margin-right: 8px;
-            vertical-align: middle;
             display: none;
         }
 
@@ -141,6 +159,7 @@
             margin-top: 1rem;
             font-size: 0.9rem;
             min-height: 1.5rem;
+            font-weight: bold;
         }
         .success { color: #10b981; }
         .error { color: #ef4444; }
@@ -157,7 +176,10 @@
             <label class="upload-area" id="dropZone">
                 <input type="file" name="pdf" id="fileInput" accept=".pdf" hidden>
                 <span class="icon">📄</span>
-                <span id="dropText">ここにPDFをドラッグ＆ドロップ<br>またはクリックして選択</span>
+                <span id="dropText">
+                    ここにPDFをドロップ<br>
+                    <span style="font-size:0.85em; color:#2563eb;">またはクリックして選択</span>
+                </span>
                 <div class="file-info" id="fileInfo"></div>
             </label>
 
@@ -181,7 +203,7 @@
         const btnText = document.getElementById('btnText');
         const statusMessage = document.getElementById('status-message');
 
-        // ドラッグ＆ドロップの演出
+        // ドラッグ＆ドロップ制御
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             dropZone.addEventListener(eventName, preventDefaults, false);
         });
@@ -213,13 +235,14 @@
         function handleFiles(files) {
             if (files.length > 0) {
                 const fileName = files[0].name;
-                fileInfo.textContent = `選択中: ${fileName}`;
+                fileInfo.textContent = `✅ ${fileName}`;
                 fileInfo.style.display = 'block';
                 dropText.style.display = 'none';
+                document.querySelector('.icon').style.display = 'none';
             }
         }
 
-        // 送信処理（Fetch APIを使って画面遷移せずにダウンロード）
+        // 送信処理
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -228,14 +251,12 @@
                 return;
             }
 
-            // ローディング開始
             setLoading(true);
             setStatus('サーバーで変換処理中... (30秒ほどかかります)', '');
 
             const formData = new FormData(form);
 
             try {
-                // サーバーへ送信
                 const response = await fetch('/convert', {
                     method: 'POST',
                     body: formData
@@ -243,30 +264,17 @@
 
                 if (!response.ok) throw new Error('変換に失敗しました');
 
-                // ファイル（Blob）として受け取る
                 const blob = await response.blob();
-                
-                // ダウンロードリンクを生成してクリックさせる
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                // ファイル名を取得（ヘッダーがあればそこから、なければ元の名前.pptx）
-                let downloadName = "converted.pptx";
-                const disposition = response.headers.get('Content-Disposition');
-                if (disposition && disposition.indexOf('filename=') !== -1) {
-                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                    const matches = filenameRegex.exec(disposition);
-                    if (matches != null && matches[1]) { 
-                        downloadName = matches[1].replace(/['"]/g, '');
-                        // 日本語ファイル名の文字化け対策（デコード）
-                        try { downloadName = decodeURIComponent(downloadName); } catch(e){}
-                    }
-                }
                 
-                // 元ファイル名 + .pptx のフォールバック
-                if(downloadName === "converted.pptx" && fileInput.files[0]) {
-                    downloadName = fileInput.files[0].name.replace('.pdf', '') + '.pptx';
-                }
+                // ★修正箇所：ファイル名の文字化け対策★
+                // サーバーからのレスポンスヘッダーを使わず、
+                // 手元のアップロードファイル名を使ってダウンロード名を決定する
+                const originalName = fileInput.files[0].name;
+                // .pdf (大文字小文字区別なし) を .pptx に置換
+                const downloadName = originalName.replace(/\.pdf$/i, '.pptx');
 
                 a.download = downloadName;
                 document.body.appendChild(a);
@@ -276,11 +284,14 @@
 
                 setStatus('ダウンロードが完了しました！', 'success');
 
+                setTimeout(() => {
+                    setLoading(false);
+                    setStatus('', '');
+                }, 3000);
+
             } catch (error) {
                 console.error(error);
                 setStatus('エラーが発生しました。もう一度お試しください。', 'error');
-            } finally {
-                // ローディング終了（ここがポイント：必ず元に戻る）
                 setLoading(false);
             }
         });
