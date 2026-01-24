@@ -6,6 +6,7 @@
     <title>PDF to PPTX Converter</title>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <style>
+        /* --- 変数定義 --- */
         :root {
             --primary: #FF7E5F;
             --secondary: #FEB47B;
@@ -13,6 +14,8 @@
             --bg-color: #FFF5F2;
             --text-color: #4B5563;
         }
+
+        /* --- 基本設定 --- */
         body {
             font-family: 'Noto Sans JP', sans-serif;
             background: var(--bg-color);
@@ -25,6 +28,7 @@
             padding: 20px;
             overflow: hidden;
         }
+
         .container {
             background: white;
             width: 100%;
@@ -35,9 +39,21 @@
             text-align: center;
             position: relative;
         }
-        h1 { font-size: 1.6rem; color: #333; margin-bottom: 0.5rem; font-weight: 700; }
-        p.subtitle { font-size: 0.95rem; color: #888; margin-bottom: 2.5rem; }
+
+        h1 {
+            font-size: 1.6rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
         
+        p.subtitle {
+            font-size: 0.95rem;
+            color: #888;
+            margin-bottom: 2.5rem;
+        }
+
+        /* --- アニメーションステージ --- */
         .magic-stage {
             height: 150px;
             display: flex;
@@ -47,15 +63,16 @@
             position: relative;
         }
 
-        /* ★画像表示用のスタイル */
+        /* ★ここが重要：ご自身の画像を表示する設定 */
         img.doc {
-            width: 100px; /* 画像のサイズ */
+            width: 100px;
             height: auto;
             position: absolute;
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 10;
-            filter: drop-shadow(0 8px 15px rgba(0,0,0,0.2)); /* 影 */
+            /* 影をつけて立体的に */
+            filter: drop-shadow(0 8px 15px rgba(0,0,0,0.2));
             object-fit: contain;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         /* PPTアイコン（完成形） */
@@ -75,15 +92,28 @@
             font-weight: bold;
             position: absolute;
         }
-        .ppt-doc::after { content: "PPTX"; font-size: 1.3rem; }
+        .ppt-doc::after { 
+            content: "PPTX"; 
+            font-size: 1.3rem; 
+        }
 
-        .part { position: absolute; background: var(--accent); opacity: 0; border-radius: 4px; }
+        /* 飛び出すパーツのデザイン */
+        .part {
+            position: absolute;
+            background: var(--accent);
+            opacity: 0;
+            border-radius: 4px;
+        }
         .part.rect { width: 30px; height: 20px; border-radius: 4px; }
         .part.circle { width: 25px; height: 25px; border-radius: 50%; }
         .part.text { width: 40px; height: 10px; background: #ccc; }
 
-        /* アニメーション */
-        .converting img.doc { animation: shakeAndBreak 1.5s forwards; }
+        /* --- アニメーション定義 --- */
+        
+        /* 1. PDF画像がブルブル震えて消える */
+        .converting img.doc {
+            animation: shakeAndBreak 1.5s forwards;
+        }
         @keyframes shakeAndBreak {
             0% { transform: translateX(0); }
             10%, 30%, 50% { transform: translateX(-5px); }
@@ -92,24 +122,32 @@
             100% { transform: scale(0); opacity: 0; }
         }
 
-        .converting .part { animation: partsFly 3s infinite ease-in-out 0.5s; }
+        /* 2. パーツが飛び回る */
+        .converting .part {
+            animation: partsFly 3s infinite ease-in-out 0.5s;
+        }
         @keyframes partsFly {
             0% { opacity: 0; transform: translate(0,0) scale(0.5) rotate(0deg); }
             20% { opacity: 1; transform: translate(var(--tx), var(--ty)) scale(1) rotate(var(--r)); }
             80% { opacity: 1; transform: translate(0,0) scale(0.8) rotate(0deg); border-radius: 50%; background: var(--secondary); }
             100% { opacity: 0; transform: scale(0); }
         }
+        /* 各パーツの軌道 */
         .p1 { --tx: -50px; --ty: -40px; --r: 45deg; }
         .p2 { --tx: 50px; --ty: -30px; --r: -60deg; animation-delay: 0.7s !important; }
         .p3 { --tx: -30px; --ty: 50px; --r: 90deg; animation-delay: 0.9s !important; }
         .p4 { --tx: 40px; --ty: 40px; --r: -30deg; animation-delay: 1.1s !important; }
 
-        .finished .ppt-doc { animation: pptAppear 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+        /* 3. PPTが出現 */
+        .finished .ppt-doc {
+            animation: pptAppear 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
         @keyframes pptAppear {
             0% { transform: scale(0) rotate(-30deg); opacity: 0; }
             100% { transform: scale(1) rotate(0deg); opacity: 1; }
         }
 
+        /* --- フォーム周りのデザイン --- */
         .upload-box {
             border: 3px dashed #FFD1C1;
             border-radius: 20px;
@@ -122,30 +160,83 @@
             align-items: center;
             gap: 15px;
         }
-        .upload-box:hover { border-color: var(--primary); background: #FFF0EB; transform: translateY(-2px); }
-        .file-name { font-weight: 700; color: var(--primary); word-break: break-all; }
+        /* ドラッグ中のホバー演出 */
+        .upload-box:hover, .upload-box.dragover {
+            border-color: var(--primary);
+            background: #FFF0EB;
+            transform: translateY(-2px);
+        }
+        
+        .file-name {
+            font-weight: 700;
+            color: var(--primary);
+            word-break: break-all;
+        }
+
         .btn-magic {
             background: linear-gradient(135deg, var(--primary), var(--secondary));
-            color: white; border: none; padding: 1.2rem; border-radius: 50px;
-            font-size: 1.1rem; font-weight: 700; cursor: pointer; margin-top: 2rem;
-            width: 100%; box-shadow: 0 10px 25px rgba(255, 126, 95, 0.3); transition: 0.3s;
+            color: white;
+            border: none;
+            padding: 1.2rem;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 2rem;
+            width: 100%;
+            box-shadow: 0 10px 25px rgba(255, 126, 95, 0.3);
+            transition: 0.3s;
         }
-        .btn-magic:hover { transform: translateY(-3px); box-shadow: 0 15px 35px rgba(255, 126, 95, 0.4); }
-        .btn-magic:disabled { background: #ccc; transform: none; box-shadow: none; cursor: not-allowed; }
+        .btn-magic:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 35px rgba(255, 126, 95, 0.4);
+        }
+        .btn-magic:disabled {
+            background: #ccc;
+            transform: none;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
 
-        .progress-section { display: none; margin-top: 30px; }
-        .progress-track { background: #eee; height: 14px; border-radius: 7px; overflow: hidden; position: relative; }
-        .progress-bar {
-            height: 100%; width: 0%; background: linear-gradient(90deg, var(--primary), var(--secondary));
-            border-radius: 7px; transition: width 0.2s linear; position: relative; overflow: hidden;
+        /* --- 進捗バーエリア --- */
+        .progress-section {
+            display: none;
+            margin-top: 30px;
         }
+        .progress-track {
+            background: #eee;
+            height: 14px;
+            border-radius: 7px;
+            overflow: hidden;
+            position: relative;
+        }
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            border-radius: 7px;
+            /* 線形(linear)にすることで一定速度で動くように設定 */
+            transition: width 0.2s linear; 
+            position: relative;
+            overflow: hidden;
+        }
+        /* ストライプアニメーション */
         .progress-bar::after {
-            content: ''; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+            content: '';
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
             background-image: linear-gradient(45deg, rgba(255,255,255,.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.2) 50%, rgba(255,255,255,.2) 75%, transparent 75%, transparent);
-            background-size: 20px 20px; animation: stripeMove 1s linear infinite;
+            background-size: 20px 20px;
+            animation: stripeMove 1s linear infinite;
         }
         @keyframes stripeMove { from { background-position: 0 0; } to { background-position: 20px 20px; } }
-        .status-msg { margin-top: 12px; font-weight: 700; color: var(--primary); min-height: 1.5em; }
+        
+        .status-msg {
+            margin-top: 12px;
+            font-weight: 700;
+            color: var(--primary);
+            min-height: 1.5em;
+        }
     </style>
 </head>
 <body>
@@ -194,61 +285,150 @@
         const statusMsg = document.getElementById('statusMsg');
         const form = document.getElementById('convertForm');
 
+        // --- ファイル選択時の処理 ---
         function handleFileSelect(file) {
             if (!file) return;
-            const dt = new DataTransfer(); dt.items.add(file); fileInput.files = dt.files;
+            // DataTransferを使ってinput要素にファイルを正しく紐付ける
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            fileInput.files = dt.files;
+
+            // UI更新
             fileNameDisplay.textContent = `✅ ${file.name}`;
-            fileNameDisplay.style.display = 'block'; dropText.style.display = 'none';
+            fileNameDisplay.style.display = 'block';
+            dropText.style.display = 'none';
+            // フォルダアイコンを隠す
             dropZone.querySelector('span[style]').style.display = 'none';
         }
 
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(e => {
-            dropZone.addEventListener(e, (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+        // --- ドラッグ＆ドロップのイベント制御 ---
+        // 1. デフォルト動作を無効化
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
         });
-        dropZone.addEventListener('drop', (e) => handleFileSelect(e.dataTransfer.files[0]));
-        fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
 
+        // 2. ホバー時の視覚効果（クラスの付け外し）
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'));
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'));
+        });
+
+        // 3. ドロップ時の処理
+        dropZone.addEventListener('drop', (e) => {
+            const file = e.dataTransfer.files[0];
+            handleFileSelect(file);
+        });
+
+        // 4. クリック選択時の処理
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            handleFileSelect(file);
+        });
+
+        // --- メッセージリスト ---
         const messages = [
-            "PDFを解析して分解しています...", "図形やテキストを抽出中...", "編集可能なパーツに変換しています...",
-            "PowerPointのスライドを構築中...", "レイアウトを整えています...", "フォントをMeiryo UIに統一中...",
-            "仕上げの魔法をかけています...", "まもなく完成します！"
+            "PDFを解析して分解しています...",
+            "図形やテキストを抽出中...",
+            "編集可能なパーツに変換しています...",
+            "PowerPointのスライドを構築中...",
+            "レイアウトを整えています...",
+            "フォントをMeiryo UIに統一中...",
+            "仕上げの魔法をかけています...",
+            "まもなく完成します！"
         ];
 
+        // --- 送信ボタンが押された時の処理 ---
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!fileInput.files || fileInput.files.length === 0) { alert('PDFファイルを選択してください！'); return; }
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('PDFファイルを選択してください！');
+                return;
+            }
+
             const originalFileName = fileInput.files[0].name;
 
-            submitBtn.disabled = true; submitBtn.style.display = 'none'; dropZone.style.display = 'none'; progressSection.style.display = 'block';
-            stage.classList.remove('finished'); stage.classList.add('converting');
+            // UI切り替え
+            submitBtn.disabled = true;
+            submitBtn.style.display = 'none';
+            dropZone.style.display = 'none';
+            progressSection.style.display = 'block';
+            
+            // アニメーション開始
+            stage.classList.remove('finished');
+            stage.classList.add('converting');
 
+            // --- 進捗バーの制御（一定速度で進む） ---
             let progress = 0;
-            const increment = 3.8 / 5;
+            // 95%まで約25秒かけて進む設定
+            const increment = 3.8 / 5; // 200msごとに約0.76%進む
+            
             const timer = setInterval(() => {
-                if (progress < 95) { progress += increment; } else { progress += 0.1; }
+                if (progress < 95) {
+                    // 95%までは一定速度で
+                    progress += increment;
+                } else {
+                    // 95%以降はゆっくり進む（完了待ち）
+                    progress += 0.1;
+                }
+                
+                // 99%で止める（完了信号が来るまで）
                 if (progress >= 99) progress = 99;
+
                 progressBar.style.width = `${progress}%`;
-                const msgIndex = Math.min(messages.length - 1, Math.floor((progress / 100) * messages.length));
+                
+                // 進捗に合わせてメッセージを更新
+                const msgIndex = Math.min(
+                    messages.length - 1, 
+                    Math.floor((progress / 100) * messages.length)
+                );
                 statusMsg.textContent = messages[msgIndex];
             }, 200);
 
             try {
                 const formData = new FormData(form);
                 const response = await fetch('/convert', { method: 'POST', body: formData });
+                
                 if (!response.ok) throw new Error('Server Error');
 
-                clearInterval(timer); progressBar.style.width = '100%'; statusMsg.textContent = "変換成功！ダウンロードします🎉";
-                stage.classList.remove('converting'); stage.classList.add('finished');
+                // --- 完了処理 ---
+                clearInterval(timer);
+                progressBar.style.width = '100%';
+                statusMsg.textContent = "変換成功！ダウンロードします🎉";
+                
+                // アニメーション終了（PPT出現）
+                stage.classList.remove('converting');
+                stage.classList.add('finished');
 
+                // ダウンロード開始
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url;
+                const a = document.createElement('a');
+                a.href = url;
+                
+                // ファイル名の処理（文字化け対策済み）
                 let downloadName = originalFileName.replace(/\.pdf$/i, '.pptx');
                 try { downloadName = decodeURIComponent(downloadName); } catch(e) {}
-                a.download = downloadName; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url);
-                setTimeout(() => { window.location.reload(); }, 5000);
+                
+                a.download = downloadName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+
+                // 5秒後に画面リロード
+                setTimeout(() => {
+                    window.location.reload();
+                }, 5000);
+
             } catch (err) {
-                clearInterval(timer); alert('変換に失敗しました。もう一度お試しください。'); window.location.reload();
+                clearInterval(timer);
+                alert('変換に失敗しました。もう一度お試しください。');
+                window.location.reload();
             }
         });
     </script>
