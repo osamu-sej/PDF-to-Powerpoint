@@ -34,16 +34,15 @@
         }
 
         /* コンテナ（白いカード部分）
-           ★修正点：影を柔らかくし、境界をなじませました
+           影を柔らかくし、境界をなじませています
         */
         .container {
             background: white;
             width: 100%;
             max-width: 480px;
             padding: 3rem 2.5rem;
-            border-radius: 35px; /* 角丸を少し強くして柔らかさを強調 */
-            /* 以前の強い影：box-shadow: 0 25px 50px rgba(255, 126, 95, 0.15); */
-            /* 新しい柔らかい影：全方向に淡く広げて境界をぼかす */
+            border-radius: 35px;
+            /* 全方向に淡く広げて境界をぼかす柔らかい影 */
             box-shadow: 0 0 70px rgba(0, 0, 0, 0.08);
             text-align: center;
             position: relative;
@@ -66,7 +65,8 @@
            アニメーションステージ (Magic Stage)
            ========================================= */
         .magic-stage {
-            height: 180px; /* 画像が大きくなるのでステージも少し高く */
+            /* ★修正点：画像のサイズダウンに合わせて高さを少し調整 */
+            height: 160px; 
             display: flex;
             justify-content: center;
             align-items: center;
@@ -75,14 +75,13 @@
         }
 
         /* PDF画像の設定 
-           ★修正点：画像を1.5倍（270px）に拡大しました
+           ★修正点：画像を270pxから220pxに縮小しました
         */
         img.doc {
-            width: 270px; /* 180px * 1.5 = 270px */
+            width: 220px; 
             height: auto;
             position: absolute;
             z-index: 10;
-            /* 画像自体の影も少し柔らかく調整 */
             filter: drop-shadow(0 10px 20px rgba(0,0,0,0.15));
             object-fit: contain;
             transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
@@ -91,7 +90,7 @@
         /* 完成後のPPTアイコン設定
         */
         .ppt-doc {
-            width: 100px; /* PPTアイコンもバランスを見て少し大きく */
+            width: 100px;
             height: 120px;
             background: #F97316;
             border-radius: 12px;
@@ -123,7 +122,7 @@
         }
 
         .part.rect { 
-            width: 35px; /* パーツも少し大きく */
+            width: 35px;
             height: 25px; 
             border-radius: 4px; 
         }
@@ -195,7 +194,7 @@
             }
         }
 
-        /* 各パーツの軌道設定（軌道を少し広げました） */
+        /* 各パーツの軌道設定 */
         .p1 { 
             --tx: -70px; 
             --ty: -60px; 
@@ -468,7 +467,6 @@
             
             // 速度設定: 0.2秒ごとに0.2%進む
             // 計算: 1秒で1%進む => 100%まで100秒
-            // これによりRenderの起動待ち(60-90秒)でもバーが途中で止まらない
             const increment = 0.2; 
             
             const timer = setInterval(() => {
