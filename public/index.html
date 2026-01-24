@@ -3,249 +3,374 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF to PPTX Pro</title>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <title>PDF to PPTX Converter</title>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700&display=swap" rel="stylesheet">
     <style>
+        /* 全体の設定：可愛らしく丸みのあるフォントと色使い */
         :root {
-            --primary: #2563eb;
-            --bg: #f3f4f6;
-            --card: #ffffff;
-            --text: #1f2937;
+            --primary: #FF7E5F; /* 温かみのあるオレンジ */
+            --secondary: #FEB47B;
+            --pdf-color: #EF4444;
+            --ppt-color: #F97316;
+            --bg-color: #FFF5F2;
+            --text-color: #4B5563;
         }
+
         body {
-            font-family: 'Noto Sans JP', sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
             margin: 0;
             padding: 20px;
+            overflow: hidden; /* アニメーションのはみ出し防止 */
         }
+
+        /* メインカード */
         .container {
-            background: var(--card);
+            background: white;
             width: 100%;
-            max-width: 500px;
-            padding: 2.5rem;
-            border-radius: 20px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            max-width: 420px;
+            padding: 3rem 2rem;
+            border-radius: 30px;
+            box-shadow: 0 20px 40px rgba(255, 126, 95, 0.15);
             text-align: center;
+            position: relative;
+            transition: transform 0.3s;
         }
-        h1 { margin: 0 0 0.5rem 0; color: #111; }
-        p.subtitle { color: #666; margin-bottom: 2rem; font-size: 0.9rem; }
+
+        h1 {
+            font-size: 1.4rem;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        
+        p.subtitle {
+            font-size: 0.9rem;
+            color: #888;
+            margin-bottom: 2rem;
+        }
+
+        /* --- [メイン] 変身アニメーションエリア --- */
+        .magic-stage {
+            height: 120px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        /* 書類アイコン */
+        .doc-icon {
+            width: 70px;
+            height: 90px;
+            border-radius: 8px;
+            position: absolute;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: white;
+            transition: all 0.5s ease;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+        }
+
+        /* PDFの状態 */
+        .doc-icon.pdf {
+            background: var(--pdf-color);
+            z-index: 2;
+        }
+        .doc-icon.pdf::after { content: "PDF"; font-size: 1.2rem; }
+
+        /* PPTの状態 */
+        .doc-icon.ppt {
+            background: var(--ppt-color);
+            transform: scale(0); /* 最初は隠れている */
+            opacity: 0;
+            z-index: 1;
+        }
+        .doc-icon.ppt::after { content: "P"; font-size: 2rem; }
+
+        /* 変換中のアニメーション動作 */
+        .converting .doc-icon.pdf {
+            animation: magicSpin 2s infinite ease-in-out;
+        }
+
+        @keyframes magicSpin {
+            0% { transform: rotate(0deg) scale(1); border-radius: 8px; }
+            50% { transform: rotate(180deg) scale(0.8); border-radius: 50%; background: var(--secondary); }
+            100% { transform: rotate(360deg) scale(1); border-radius: 8px; }
+        }
 
         /* アップロードエリア */
-        .upload-area {
-            border: 2px dashed #e5e7eb;
-            border-radius: 12px;
+        .upload-box {
+            border: 3px dashed #FFD1C1;
+            border-radius: 20px;
             padding: 2rem;
             cursor: pointer;
-            background: #f9fafb;
             transition: 0.3s;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
+            background: #FFFBF9;
         }
-        .upload-area:hover, .upload-area.dragover {
+        .upload-box:hover {
             border-color: var(--primary);
-            background: #eff6ff;
+            background: #FFF0EB;
+            transform: translateY(-2px);
         }
-        .icon { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
-        .file-info { font-weight: bold; color: var(--primary); display: none; }
+        
+        .file-name-display {
+            font-weight: bold;
+            color: var(--primary);
+            display: none;
+            word-break: break-all;
+            margin-top: 10px;
+        }
 
         /* ボタン */
-        .btn-convert {
-            background: var(--primary);
+        .btn-magic {
+            background: linear-gradient(135deg, #FF7E5F, #FEB47B);
             color: white;
             border: none;
-            padding: 1rem;
-            width: 100%;
-            border-radius: 10px;
+            padding: 1rem 2rem;
+            border-radius: 50px;
             font-size: 1rem;
             font-weight: bold;
             cursor: pointer;
             margin-top: 1.5rem;
-            transition: 0.2s;
-        }
-        .btn-convert:disabled { background: #ccc; cursor: not-allowed; }
-
-        /* --- 新しいプログレスバーのデザイン --- */
-        .progress-container {
-            margin-top: 20px;
-            display: none; /* 最初は隠す */
-            text-align: left;
-        }
-        .progress-bar-bg {
             width: 100%;
-            height: 10px;
-            background-color: #e5e7eb;
-            border-radius: 5px;
-            overflow: hidden;
-            margin-bottom: 8px;
+            box-shadow: 0 10px 20px rgba(255, 126, 95, 0.3);
+            transition: 0.3s;
         }
-        .progress-bar-fill {
+        .btn-magic:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 15px 30px rgba(255, 126, 95, 0.4);
+        }
+        .btn-magic:disabled {
+            background: #ccc;
+            cursor: default;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* --- 新・プログレスバー --- */
+        .progress-wrapper {
+            margin-top: 20px;
+            display: none; /* 最初は非表示 */
+        }
+        
+        .progress-track {
+            width: 100%;
+            height: 12px;
+            background: #eee;
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .progress-fill {
             height: 100%;
             width: 0%;
-            background: linear-gradient(90deg, #2563eb, #3b82f6);
-            border-radius: 5px;
-            transition: width 0.3s ease-out;
+            background: linear-gradient(90deg, #FF7E5F, #FEB47B);
+            border-radius: 10px;
+            transition: width 0.2s linear; /* カクつかせない */
+            position: relative;
         }
-        .status-text {
-            font-size: 0.9rem;
-            font-weight: bold;
-            color: #374151;
-            display: flex;
-            justify-content: space-between;
+        
+        /* 縞模様のアニメーション */
+        .progress-fill::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background-image: linear-gradient(
+                45deg, 
+                rgba(255,255,255,0.2) 25%, 
+                transparent 25%, 
+                transparent 50%, 
+                rgba(255,255,255,0.2) 50%, 
+                rgba(255,255,255,0.2) 75%, 
+                transparent 75%, 
+                transparent
+            );
+            background-size: 20px 20px;
+            animation: moveStripe 1s linear infinite;
         }
-        .fun-message {
-            font-size: 0.8rem;
-            color: #6b7280;
-            margin-top: 5px;
-            height: 1.2em; /* ガタつき防止 */
+        
+        @keyframes moveStripe {
+            0% { background-position: 0 0; }
+            100% { background-position: 20px 20px; }
         }
 
-        /* 完了時のアニメーション */
-        @keyframes pop {
-            0% { transform: scale(0.95); opacity: 0; }
+        .status-msg {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: var(--primary);
+            font-weight: bold;
+            min-height: 1.2em;
+        }
+
+        /* 成功時の演出 */
+        .success-overlay {
+            display: none;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
             100% { transform: scale(1); opacity: 1; }
         }
-        .success-message {
-            color: #10b981;
-            font-weight: bold;
-            margin-top: 15px;
-            display: none;
-            animation: pop 0.3s ease-out;
-        }
+
     </style>
 </head>
 <body>
+
     <div class="container">
-        <h1>PDF to PPTX Pro</h1>
-        <p class="subtitle">Meiryo UI 最適化・AIレイアウト調整</p>
+        <h1>PDF to PPTX Magic</h1>
+        <p class="subtitle">AIがレイアウトを解析して変換します</p>
+
+        <div class="magic-stage" id="stage">
+            <div class="doc-icon pdf" id="iconPdf"></div>
+            <div class="doc-icon ppt" id="iconPpt"></div>
+        </div>
 
         <form id="convertForm">
-            <label class="upload-area" id="dropZone">
+            <label class="upload-box" id="dropZone">
                 <input type="file" name="pdf" id="fileInput" accept=".pdf" hidden>
-                <span class="icon">📂</span>
-                <span id="dropText">ここにPDFをドロップ<br><small style="color:#2563eb">またはクリックして選択</small></span>
-                <div class="file-info" id="fileInfo"></div>
+                <span style="font-size: 2rem;">📂</span><br>
+                <span id="dropText">ここにPDFを置いてね</span>
+                <div class="file-name-display" id="fileName"></div>
             </label>
 
-            <div class="progress-container" id="progressContainer">
-                <div class="status-text">
-                    <span id="percentText">0%</span>
+            <div class="progress-wrapper" id="progressWrapper">
+                <div class="progress-track">
+                    <div class="progress-fill" id="progressBar"></div>
                 </div>
-                <div class="progress-bar-bg">
-                    <div class="progress-bar-fill" id="progressBar"></div>
-                </div>
-                <div class="fun-message" id="funMessage">準備中...</div>
+                <div class="status-msg" id="statusMsg">準備中...</div>
             </div>
 
-            <button type="submit" class="btn-convert" id="submitBtn">変換してダウンロード</button>
+            <button type="submit" class="btn-magic" id="submitBtn">魔法をかける ✨</button>
         </form>
 
-        <div class="success-message" id="successMessage">🎉 ダウンロード完了！</div>
+        <div class="success-overlay" id="successOverlay">
+            <h2 style="color: #F97316;">変換完了！🎉</h2>
+            <p>ダウンロードが始まります...</p>
+        </div>
     </div>
 
     <script>
+        const stage = document.getElementById('stage');
+        const iconPdf = document.getElementById('iconPdf');
+        const iconPpt = document.getElementById('iconPpt');
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
-        const fileInfo = document.getElementById('fileInfo');
+        const fileNameDisplay = document.getElementById('fileName');
         const dropText = document.getElementById('dropText');
-        const form = document.getElementById('convertForm');
         const submitBtn = document.getElementById('submitBtn');
-        const progressContainer = document.getElementById('progressContainer');
+        const progressWrapper = document.getElementById('progressWrapper');
         const progressBar = document.getElementById('progressBar');
-        const percentText = document.getElementById('percentText');
-        const funMessage = document.getElementById('funMessage');
-        const successMessage = document.getElementById('successMessage');
+        const statusMsg = document.getElementById('statusMsg');
+        const successOverlay = document.getElementById('successOverlay');
 
-        // ドラッグ＆ドロップ処理
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
-            dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); });
+        // ドラッグ&ドロップ
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(e => {
+            dropZone.addEventListener(e, (ev) => { ev.preventDefault(); ev.stopPropagation(); });
         });
-        dropZone.addEventListener('dragover', () => dropZone.style.background = '#eff6ff');
-        dropZone.addEventListener('dragleave', () => dropZone.style.background = '#f9fafb');
-        dropZone.addEventListener('drop', (e) => {
-            dropZone.style.background = '#f9fafb';
-            fileInput.files = e.dataTransfer.files;
-            handleFile(fileInput.files[0]);
-        });
+        dropZone.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
         fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
 
         function handleFile(file) {
             if (file) {
-                fileInfo.textContent = `✅ ${file.name}`;
-                fileInfo.style.display = 'block';
+                fileInput.files = createFileList(file); // inputにもセット
+                fileNameDisplay.textContent = file.name;
+                fileNameDisplay.style.display = 'block';
                 dropText.style.display = 'none';
-                document.querySelector('.icon').style.display = 'none';
             }
         }
+        // FileList作成ヘルパー
+        function createFileList(file) {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            return dt.files;
+        }
 
-        // 面白いメッセージのリスト
         const messages = [
-            "AIがPDFを読み込んでいます...",
+            "書類を読み込んでいます...",
             "レイアウトを解析中...",
-            "フォントを Meiryo UI に統一中...",
-            "文字サイズを微調整しています...",
-            "スライドのデザインを整えています...",
-            "最終仕上げをしています...",
-            "もう少しです！"
+            "フォントを Meiryo UI に変更中...",
+            "スライドを組み立てています...",
+            "デザインを整えています...",
+            "仕上げの魔法をかけています...",
+            "あと少し！頑張っています..."
         ];
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!fileInput.files.length) return alert('ファイルを選択してください');
+            if (!fileInput.files.length) return alert('PDFを選んでください！');
 
-            // UIリセット
-            submitBtn.disabled = true;
-            submitBtn.style.display = 'none'; // ボタンを消してバーを出す
-            progressContainer.style.display = 'block';
-            successMessage.style.display = 'none';
-            
-            let progress = 0;
-            let msgIndex = 0;
+            // --- UI切り替え ---
+            submitBtn.style.display = 'none';
+            dropZone.style.display = 'none';
+            progressWrapper.style.display = 'block';
+            stage.classList.add('converting'); // アイコン回転開始
 
-            // プログレスバーのアニメーション（シミュレーション）
+            // --- 進捗ロジック（減衰方式） ---
+            let currentProgress = 0;
+            let targetProgress = 95; // 95%を目指して進む
+            let speed = 2.0; // 初速
+
             const timer = setInterval(() => {
-                // 90%までは自動で進む
-                if (progress < 90) {
-                    // ランダムに少しずつ進める
-                    progress += Math.random() * 5; 
-                    if (progress > 90) progress = 90;
-                    
-                    updateProgress(progress);
-
-                    // メッセージを切り替え
-                    if (progress > (msgIndex + 1) * (90 / messages.length)) {
-                        if (msgIndex < messages.length - 1) {
-                            msgIndex++;
-                            funMessage.textContent = messages[msgIndex];
-                        }
-                    }
+                // 現在値と目標値の差分をとって、少しずつ進む（Zenodのパラドックス的アプローチ）
+                // これにより、最初は速く、後半はゆっくりになるが、決して止まらない
+                const diff = targetProgress - currentProgress;
+                
+                if (diff > 0.5) {
+                    currentProgress += diff * 0.05; // 残りの5%ずつ進む
+                } else {
+                    currentProgress += 0.1; // 極限まで近づいたら微速前進
                 }
-            }, 500); // 0.5秒ごとに更新
 
-            function updateProgress(val) {
-                const p = Math.round(val);
-                progressBar.style.width = `${p}%`;
-                percentText.textContent = `${p}%`;
-            }
+                // 99%でキャップする（完了通知が来るまで）
+                if (currentProgress >= 99) currentProgress = 99;
+
+                progressBar.style.width = `${currentProgress}%`;
+
+                // メッセージ切り替え（進捗度に合わせて）
+                const msgIndex = Math.min(
+                    messages.length - 1, 
+                    Math.floor((currentProgress / 100) * messages.length)
+                );
+                statusMsg.textContent = messages[msgIndex];
+
+            }, 200); // 0.2秒ごとに更新
 
             try {
-                const formData = new FormData(form);
+                const formData = new FormData(document.getElementById('convertForm'));
                 const response = await fetch('/convert', { method: 'POST', body: formData });
-                
-                if (!response.ok) throw new Error('変換失敗');
 
-                // 完了したら一気に100%へ
+                if (!response.ok) throw new Error('変換エラー');
+
+                // --- 完了演出 ---
                 clearInterval(timer);
-                updateProgress(100);
-                funMessage.textContent = "完了しました！ダウンロードを開始します。";
+                progressBar.style.width = '100%';
+                statusMsg.textContent = "完成しました！";
+                
+                // 回転を止めて、ポンッとPPTに変身
+                stage.classList.remove('converting');
+                iconPdf.style.transform = "scale(0) rotate(360deg)"; // PDF消える
+                iconPdf.style.opacity = "0";
+                
+                iconPpt.style.transform = "scale(1.2) rotate(0deg)"; // PPT現れる
+                iconPpt.style.opacity = "1";
+                
+                setTimeout(() => {
+                    iconPpt.style.transform = "scale(1) rotate(0deg)";
+                    successOverlay.style.display = 'block';
+                    progressWrapper.style.display = 'none';
+                }, 300);
 
-                // ダウンロード処理
+                // ダウンロード
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -256,24 +381,14 @@
                 a.click();
                 a.remove();
 
-                // 完了表示
+                // 5秒後にリセット
                 setTimeout(() => {
-                    successMessage.style.display = 'block';
-                    // 3秒後にリセット
-                    setTimeout(() => {
-                        submitBtn.disabled = false;
-                        submitBtn.style.display = 'block';
-                        progressContainer.style.display = 'none';
-                        successMessage.style.display = 'none';
-                        // プログレスバーのリセット
-                        updateProgress(0);
-                        funMessage.textContent = messages[0];
-                    }, 3000);
-                }, 500);
+                    location.reload();
+                }, 5000);
 
             } catch (err) {
                 clearInterval(timer);
-                alert('エラーが発生しました');
+                alert('変換に失敗しました... もう一度試してください。');
                 location.reload();
             }
         });
