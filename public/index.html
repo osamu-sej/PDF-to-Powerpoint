@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF to PowerPoint Converter</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; margin: 0; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; width: 100%; max-width: 400px; }
+        h1 { color: #333; margin-bottom: 1.5rem; font-size: 1.5rem; }
+        .upload-box { border: 2px dashed #ccc; padding: 2rem; border-radius: 8px; margin-bottom: 1.5rem; transition: 0.3s; }
+        .upload-box:hover { border-color: #666; background: #f9f9f9; }
+        input[type="file"] { display: none; }
+        label { cursor: pointer; color: #007bff; font-weight: bold; }
+        button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 1rem; cursor: pointer; width: 100%; transition: 0.3s; }
+        button:hover { background: #0056b3; }
+        .note { margin-top: 1rem; font-size: 0.8rem; color: #666; }
+        #status { margin-top: 1rem; font-weight: bold; display: none; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>📄 PDF → PPTX 変換</h1>
+        <form action="/convert" method="POST" enctype="multipart/form-data" onsubmit="showLoading()">
+            <div class="upload-box">
+                <label for="file">
+                    PDFファイルをドロップ<br>またはクリックして選択
+                </label>
+                <input type="file" id="file" name="pdf" accept=".pdf" required onchange="updateFileName(this)">
+                <div id="file-name" style="margin-top: 10px; color: #333;"></div>
+            </div>
+            <button type="submit">変換してダウンロード</button>
+        </form>
+        <div id="status">⏳ 変換中... (数秒かかります)</div>
+        <p class="note">※変換が終わると自動的にダウンロードが始まります。</p>
+    </div>
+
+    <script>
+        function updateFileName(input) {
+            const fileName = input.files[0] ? input.files[0].name : "";
+            document.getElementById('file-name').textContent = fileName;
+        }
+        function showLoading() {
+            document.getElementById('status').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
