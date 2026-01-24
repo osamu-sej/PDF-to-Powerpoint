@@ -1,0 +1,9 @@
+[
+  {
+    "timestamp": "2026-01-24T11:00:00.912Z",
+    "original_input": "input.pdf",
+    "archived_as": "20260124110000_input.pdf",
+    "status": "Success",
+    "note": "Converted with 1-step font reduction"
+  }
+]

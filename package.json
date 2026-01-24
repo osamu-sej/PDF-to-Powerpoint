@@ -6,11 +6,22 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "convert": "node index.js"
   },
   "dependencies": {
+    "@google/genai": "latest",
+    "@google/generative-ai": "^0.24.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jszip": "^3.10.1",
+    "multer": "^2.0.2",
+    "pdf-images": "^1.3.3",
+    "pdf-parse": "^1.1.1",
+    "pdf2json": "^4.0.2",
+    "pptxgenjs": "^4.0.1",
     "react": "18.2.0",
-    "@google/genai": "latest"
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
