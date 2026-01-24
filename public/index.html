@@ -13,7 +13,7 @@
             --primary: #FF7E5F;
             --secondary: #FEB47B;
             --accent: #8B5CF6;
-            --bg-color: #FFF5F2;
+            --bg-color: #FFF5F2; /* 薄いグレー（少し赤みのある温かいグレー） */
             --text-color: #4B5563;
         }
 
@@ -33,13 +33,18 @@
             overflow: hidden;
         }
 
+        /* コンテナ（白いカード部分）
+           ★修正点：影を柔らかくし、境界をなじませました
+        */
         .container {
             background: white;
             width: 100%;
             max-width: 480px;
             padding: 3rem 2.5rem;
-            border-radius: 30px;
-            box-shadow: 0 25px 50px rgba(255, 126, 95, 0.15);
+            border-radius: 35px; /* 角丸を少し強くして柔らかさを強調 */
+            /* 以前の強い影：box-shadow: 0 25px 50px rgba(255, 126, 95, 0.15); */
+            /* 新しい柔らかい影：全方向に淡く広げて境界をぼかす */
+            box-shadow: 0 0 70px rgba(0, 0, 0, 0.08);
             text-align: center;
             position: relative;
         }
@@ -61,7 +66,7 @@
            アニメーションステージ (Magic Stage)
            ========================================= */
         .magic-stage {
-            height: 150px;
+            height: 180px; /* 画像が大きくなるのでステージも少し高く */
             display: flex;
             justify-content: center;
             align-items: center;
@@ -70,14 +75,15 @@
         }
 
         /* PDF画像の設定 
-           ユーザー様指定の画像を大きく表示 (180px)
+           ★修正点：画像を1.5倍（270px）に拡大しました
         */
         img.doc {
-            width: 180px; 
+            width: 270px; /* 180px * 1.5 = 270px */
             height: auto;
             position: absolute;
             z-index: 10;
-            filter: drop-shadow(0 8px 15px rgba(0,0,0,0.2));
+            /* 画像自体の影も少し柔らかく調整 */
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.15));
             object-fit: contain;
             transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -85,8 +91,8 @@
         /* 完成後のPPTアイコン設定
         */
         .ppt-doc {
-            width: 80px;
-            height: 100px;
+            width: 100px; /* PPTアイコンもバランスを見て少し大きく */
+            height: 120px;
             background: #F97316;
             border-radius: 12px;
             transform: scale(0);
@@ -103,7 +109,7 @@
         
         .ppt-doc::after { 
             content: "PPTX"; 
-            font-size: 1.3rem; 
+            font-size: 1.5rem; 
         }
 
         /* =========================================
@@ -117,20 +123,20 @@
         }
 
         .part.rect { 
-            width: 30px; 
-            height: 20px; 
+            width: 35px; /* パーツも少し大きく */
+            height: 25px; 
             border-radius: 4px; 
         }
 
         .part.circle { 
-            width: 25px; 
-            height: 25px; 
+            width: 30px; 
+            height: 30px; 
             border-radius: 50%; 
         }
 
         .part.text { 
-            width: 40px; 
-            height: 10px; 
+            width: 50px; 
+            height: 12px; 
             background: #ccc; 
         }
 
@@ -145,17 +151,17 @@
 
         @keyframes shakeAndBreak {
             0% { 
-                transform: translateX(0); 
+                transform: translateX(0) scale(1); 
             }
             10%, 30%, 50% { 
-                transform: translateX(-5px); 
+                transform: translateX(-7px) scale(1.02); 
             }
             20%, 40%, 60% { 
-                transform: translateX(5px); 
+                transform: translateX(7px) scale(1.02); 
             }
             70% { 
-                transform: scale(1.1); 
-                opacity: 1; 
+                transform: scale(1.2); 
+                opacity: 0.8; 
             }
             100% { 
                 transform: scale(0); 
@@ -189,27 +195,27 @@
             }
         }
 
-        /* 各パーツの軌道設定 */
+        /* 各パーツの軌道設定（軌道を少し広げました） */
         .p1 { 
-            --tx: -50px; 
-            --ty: -40px; 
+            --tx: -70px; 
+            --ty: -60px; 
             --r: 45deg; 
         }
         .p2 { 
-            --tx: 50px; 
-            --ty: -30px; 
+            --tx: 70px; 
+            --ty: -50px; 
             --r: -60deg; 
             animation-delay: 0.7s !important; 
         }
         .p3 { 
-            --tx: -30px; 
-            --ty: 50px; 
+            --tx: -50px; 
+            --ty: 70px; 
             --r: 90deg; 
             animation-delay: 0.9s !important; 
         }
         .p4 { 
-            --tx: 40px; 
-            --ty: 40px; 
+            --tx: 60px; 
+            --ty: 60px; 
             --r: -30deg; 
             animation-delay: 1.1s !important; 
         }
