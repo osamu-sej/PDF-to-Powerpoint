@@ -25,9 +25,18 @@ PDF をはじめ、さまざまなソースを「編集可能な」PowerPoint (P
    すべてのテキストボックスに `wrap="none"` と `noAutofit` を設定し、
    PowerPoint 側での勝手な折り返し・自動縮小によるレイアウト崩れを防ぎます。
 4. **サーバー側フォントの充実 + fontconfig 代替マッピング**
-   Noto CJK 全ウェイト・IPA・Liberation（Arial/Times 互換）・Carlito（Calibri 互換）等を導入し、
-   `fonts-ja-substitute.conf` で Windows フォント名を対応付けることで、
-   LibreOffice の文字幅計測を実フォントに近づけ、位置ズレを抑えます。
+   Noto CJK 全ウェイト・BIZ UD ゴシック/明朝・IPA・Liberation（Arial/Times 互換）・
+   Carlito（Calibri 互換）等を導入し、`fonts-ja-substitute.conf` で Windows フォント名を
+   対応付けることで、LibreOffice の文字幅計測を実フォントに近づけ、位置ズレを抑えます。
+5. **ラスタ化された文字フチの除去とネイティブ輪郭への置換**
+   「白文字＋黒フチ」のような装飾文字は、LibreOffice のインポートでフチ部分が
+   単色ビットマップとして取り込まれ、正しいテキストに重なって表示を汚します。
+   これを自動検出して除去し、代わりに PowerPoint ネイティブの文字輪郭を
+   元のフチ色で付与することで、見た目を保ったまま編集可能にします。
+6. **fit-to-box 補正**
+   PDF 内で横方向に圧縮（長体）されたテキストは枠からはみ出しやすいため、
+   枠幅と推定テキスト幅を比較し、はみ出す行にだけ文字間隔の微調整を入れて
+   枠内に収めます（全角主体の行のみ・過剰圧縮はクランプ）。
 
 ## 変換オプション（画面の「詳細オプション」）
 
