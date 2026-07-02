@@ -349,12 +349,97 @@
             color: var(--primary);
             min-height: 1.5em;
         }
+
+        /* =========================================
+           入力切替タブ (Source Tabs)
+           ========================================= */
+        .source-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 1.2rem;
+        }
+
+        .source-tab {
+            flex: 1;
+            padding: 0.7rem;
+            border: 2px solid #FFD1C1;
+            border-radius: 14px;
+            background: #FFFBF9;
+            color: var(--text-color);
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .source-tab.active {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-color: transparent;
+            color: white;
+        }
+
+        .url-box {
+            display: none;
+        }
+
+        .url-box input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 1.1rem 1.2rem;
+            border: 3px dashed #FFD1C1;
+            border-radius: 20px;
+            background: #FFFBF9;
+            font-size: 1rem;
+            font-family: inherit;
+            color: var(--text-color);
+            outline: none;
+            transition: 0.3s;
+        }
+
+        .url-box input:focus {
+            border-color: var(--primary);
+            background: #FFF0EB;
+        }
+
+        /* =========================================
+           詳細オプション (Advanced Options)
+           ========================================= */
+        details.options {
+            margin-top: 1.2rem;
+            text-align: left;
+            background: #FFFBF9;
+            border-radius: 14px;
+            padding: 0.8rem 1.2rem;
+            font-size: 0.88rem;
+        }
+
+        details.options summary {
+            cursor: pointer;
+            font-weight: 700;
+            color: #888;
+        }
+
+        .opt-group {
+            margin-top: 0.8rem;
+        }
+
+        .opt-group .opt-label {
+            font-weight: 700;
+            color: #666;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .opt-group label {
+            margin-right: 14px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>PDF to PPTX Converter</h1>
-        <p class="subtitle">PDFを編集可能なPowerPointに変換します</p>
+        <h1>PPTX Converter</h1>
+        <p class="subtitle">PDF・HTML・Word・Excel・画像・Webページを<br>編集可能なPowerPointに変換します</p>
 
         <div class="magic-stage" id="stage">
             <img src="pdf-image.png" class="doc" alt="PDF">
@@ -367,12 +452,36 @@
         </div>
 
         <form id="convertForm">
+            <div class="source-tabs">
+                <button type="button" class="source-tab active" id="tabFile">📄 ファイル</button>
+                <button type="button" class="source-tab" id="tabUrl">🌐 Webページ (URL)</button>
+            </div>
+
             <label class="upload-box" id="dropZone">
-                <input type="file" name="pdf" id="fileInput" accept=".pdf" hidden>
+                <input type="file" name="file" id="fileInput"
+                       accept=".pdf,.html,.htm,.doc,.docx,.odt,.rtf,.txt,.xls,.xlsx,.ods,.csv,.ppt,.odp,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" hidden>
                 <span style="font-size: 3rem; line-height: 1;">📂</span>
-                <span id="dropText">PDFファイルをここにドロップ<br><small style="color: var(--primary);">またはクリックして選択</small></span>
+                <span id="dropText">変換したいファイルをここにドロップ<br><small style="color: var(--primary);">PDF / HTML / Word / Excel / 画像 など</small></span>
                 <div class="file-name" id="fileNameDisplay" style="display: none;"></div>
             </label>
+
+            <div class="url-box" id="urlBox">
+                <input type="url" id="urlInput" placeholder="https://example.com/page.html">
+            </div>
+
+            <details class="options" id="optionsBox">
+                <summary>⚙️ 詳細オプション</summary>
+                <div class="opt-group">
+                    <span class="opt-label">フォント</span>
+                    <label><input type="radio" name="fontMode" value="auto" checked> 元のフォントを保持（推奨）</label>
+                    <label><input type="radio" name="fontMode" value="unify"> Meiryo UI に統一</label>
+                </div>
+                <div class="opt-group">
+                    <span class="opt-label">文字サイズ</span>
+                    <label><input type="radio" name="sizeMode" value="keep" checked> 原寸を維持（推奨）</label>
+                    <label><input type="radio" name="sizeMode" value="shrink"> 一段階小さくする</label>
+                </div>
+            </details>
 
             <div class="progress-section" id="progressSection">
                 <div class="progress-track">
@@ -399,6 +508,26 @@
         const progressBar = document.getElementById('progressBar');
         const statusMsg = document.getElementById('statusMsg');
         const form = document.getElementById('convertForm');
+        const tabFile = document.getElementById('tabFile');
+        const tabUrl = document.getElementById('tabUrl');
+        const urlBox = document.getElementById('urlBox');
+        const urlInput = document.getElementById('urlInput');
+        const optionsBox = document.getElementById('optionsBox');
+
+        let sourceMode = 'file'; // 'file' or 'url'
+
+        // =========================================
+        // 入力ソース切替（ファイル / URL）
+        // =========================================
+        function setSourceMode(mode) {
+            sourceMode = mode;
+            tabFile.classList.toggle('active', mode === 'file');
+            tabUrl.classList.toggle('active', mode === 'url');
+            dropZone.style.display = mode === 'file' ? 'flex' : 'none';
+            urlBox.style.display = mode === 'url' ? 'block' : 'none';
+        }
+        tabFile.addEventListener('click', () => setSourceMode('file'));
+        tabUrl.addEventListener('click', () => setSourceMode('url'));
 
         // =========================================
         // ファイル選択処理
@@ -441,19 +570,38 @@
         // =========================================
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            // ファイルチェック
-            if (!fileInput.files || fileInput.files.length === 0) {
-                alert('PDFファイルを選択してください！');
-                return;
+
+            // 入力チェック
+            let originalFileName;
+            if (sourceMode === 'file') {
+                if (!fileInput.files || fileInput.files.length === 0) {
+                    alert('変換したいファイルを選択してください！');
+                    return;
+                }
+                originalFileName = fileInput.files[0].name;
+            } else {
+                if (!urlInput.value || !/^https?:\/\//i.test(urlInput.value)) {
+                    alert('https:// から始まるURLを入力してください！');
+                    return;
+                }
+                try {
+                    originalFileName = new URL(urlInput.value).hostname + '.pptx';
+                } catch (err) {
+                    originalFileName = 'webpage.pptx';
+                }
             }
 
-            const originalFileName = fileInput.files[0].name;
+            // 選択中のオプションを取得
+            const fontMode = form.querySelector('input[name="fontMode"]:checked').value;
+            const sizeMode = form.querySelector('input[name="sizeMode"]:checked').value;
 
             // UIの切り替え（ボタン非表示、バー表示）
             submitBtn.disabled = true;
             submitBtn.style.display = 'none';
             dropZone.style.display = 'none';
+            urlBox.style.display = 'none';
+            optionsBox.style.display = 'none';
+            document.querySelector('.source-tabs').style.display = 'none';
             progressSection.style.display = 'block';
             
             // アニメーション開始
@@ -504,12 +652,24 @@
             // サーバー通信 (Fetch API)
             // =========================================
             try {
-                const formData = new FormData(form);
-                const response = await fetch('/convert', { 
-                    method: 'POST', 
-                    body: formData 
-                });
-                
+                let response;
+                if (sourceMode === 'file') {
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
+                    formData.append('fontMode', fontMode);
+                    formData.append('sizeMode', sizeMode);
+                    response = await fetch('/convert', {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    response = await fetch('/convert-url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: urlInput.value, fontMode, sizeMode })
+                    });
+                }
+
                 if (!response.ok) throw new Error('Server Error');
 
                 // --- 完了処理 ---
@@ -530,7 +690,7 @@
                 a.href = url;
                 
                 // ファイル名の処理 (文字化け対策済み)
-                let downloadName = originalFileName.replace(/\.pdf$/i, '.pptx');
+                let downloadName = originalFileName.replace(/\.[^.]+$/, '') + '.pptx';
                 try { 
                     downloadName = decodeURIComponent(downloadName); 
                 } catch(e) {}
