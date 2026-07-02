@@ -434,6 +434,19 @@
             margin-right: 14px;
             cursor: pointer;
         }
+
+        /* =========================================
+           バージョンバッジ (Version Badge)
+           ========================================= */
+        .version-badge {
+            position: absolute;
+            bottom: 14px;
+            right: 22px;
+            font-size: 0.75rem;
+            color: #bbb;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
     </style>
 </head>
 <body>
@@ -492,6 +505,8 @@
 
             <button type="submit" class="btn-magic" id="submitBtn">魔法をかけて変換する ✨</button>
         </form>
+
+        <div class="version-badge" id="versionBadge" title="サーバーで動作中のバージョン"></div>
     </div>
 
     <script>
@@ -528,6 +543,20 @@
         }
         tabFile.addEventListener('click', () => setSourceMode('file'));
         tabUrl.addEventListener('click', () => setSourceMode('url'));
+
+        // =========================================
+        // バージョン表示（サーバーから取得するため、
+        // 実際にデプロイされているバージョンが表示される）
+        // =========================================
+        fetch('/version')
+            .then(r => r.json())
+            .then(info => {
+                document.getElementById('versionBadge').textContent = `v${info.version}`;
+            })
+            .catch(() => {
+                // 旧バージョンのサーバーには /version が無い
+                document.getElementById('versionBadge').textContent = '旧バージョン';
+            });
 
         // =========================================
         // ファイル選択処理
