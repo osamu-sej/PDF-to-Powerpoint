@@ -351,57 +351,6 @@
         }
 
         /* =========================================
-           入力切替タブ (Source Tabs)
-           ========================================= */
-        .source-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 1.2rem;
-        }
-
-        .source-tab {
-            flex: 1;
-            padding: 0.7rem;
-            border: 2px solid #FFD1C1;
-            border-radius: 14px;
-            background: #FFFBF9;
-            color: var(--text-color);
-            font-weight: 700;
-            font-size: 0.95rem;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-
-        .source-tab.active {
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
-            border-color: transparent;
-            color: white;
-        }
-
-        .url-box {
-            display: none;
-        }
-
-        .url-box input {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 1.1rem 1.2rem;
-            border: 3px dashed #FFD1C1;
-            border-radius: 20px;
-            background: #FFFBF9;
-            font-size: 1rem;
-            font-family: inherit;
-            color: var(--text-color);
-            outline: none;
-            transition: 0.3s;
-        }
-
-        .url-box input:focus {
-            border-color: var(--primary);
-            background: #FFF0EB;
-        }
-
-        /* =========================================
            詳細オプション (Advanced Options)
            ========================================= */
         details.options {
@@ -452,7 +401,7 @@
 <body>
     <div class="container">
         <h1>PPTX Converter</h1>
-        <p class="subtitle">PDF・HTML・Word・Excel・画像・Webページを<br>編集可能なPowerPointに変換します</p>
+        <p class="subtitle">PDF・HTML・Word・Excel・画像を<br>編集可能なPowerPointに変換します</p>
 
         <div class="magic-stage" id="stage">
             <img src="pdf-image.png" class="doc" alt="PDF">
@@ -465,11 +414,6 @@
         </div>
 
         <form id="convertForm">
-            <div class="source-tabs">
-                <button type="button" class="source-tab active" id="tabFile">📄 ファイル</button>
-                <button type="button" class="source-tab" id="tabUrl">🌐 Webページ (URL)</button>
-            </div>
-
             <label class="upload-box" id="dropZone">
                 <input type="file" name="file" id="fileInput"
                        accept=".pdf,.html,.htm,.doc,.docx,.odt,.rtf,.txt,.xls,.xlsx,.ods,.csv,.ppt,.odp,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" hidden>
@@ -477,10 +421,6 @@
                 <span id="dropText">変換したいファイルをここにドロップ<br><small style="color: var(--primary);">PDF / HTML / Word / Excel / 画像 など</small></span>
                 <div class="file-name" id="fileNameDisplay" style="display: none;"></div>
             </label>
-
-            <div class="url-box" id="urlBox">
-                <input type="url" id="urlInput" placeholder="https://example.com/page.html">
-            </div>
 
             <details class="options" id="optionsBox">
                 <summary>⚙️ 詳細オプション</summary>
@@ -523,26 +463,7 @@
         const progressBar = document.getElementById('progressBar');
         const statusMsg = document.getElementById('statusMsg');
         const form = document.getElementById('convertForm');
-        const tabFile = document.getElementById('tabFile');
-        const tabUrl = document.getElementById('tabUrl');
-        const urlBox = document.getElementById('urlBox');
-        const urlInput = document.getElementById('urlInput');
         const optionsBox = document.getElementById('optionsBox');
-
-        let sourceMode = 'file'; // 'file' or 'url'
-
-        // =========================================
-        // 入力ソース切替（ファイル / URL）
-        // =========================================
-        function setSourceMode(mode) {
-            sourceMode = mode;
-            tabFile.classList.toggle('active', mode === 'file');
-            tabUrl.classList.toggle('active', mode === 'url');
-            dropZone.style.display = mode === 'file' ? 'flex' : 'none';
-            urlBox.style.display = mode === 'url' ? 'block' : 'none';
-        }
-        tabFile.addEventListener('click', () => setSourceMode('file'));
-        tabUrl.addEventListener('click', () => setSourceMode('url'));
 
         // =========================================
         // バージョン表示（サーバーから取得するため、
@@ -601,24 +522,11 @@
             e.preventDefault();
 
             // 入力チェック
-            let originalFileName;
-            if (sourceMode === 'file') {
-                if (!fileInput.files || fileInput.files.length === 0) {
-                    alert('変換したいファイルを選択してください！');
-                    return;
-                }
-                originalFileName = fileInput.files[0].name;
-            } else {
-                if (!urlInput.value || !/^https?:\/\//i.test(urlInput.value)) {
-                    alert('https:// から始まるURLを入力してください！');
-                    return;
-                }
-                try {
-                    originalFileName = new URL(urlInput.value).hostname + '.pptx';
-                } catch (err) {
-                    originalFileName = 'webpage.pptx';
-                }
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('変換したいファイルを選択してください！');
+                return;
             }
+            const originalFileName = fileInput.files[0].name;
 
             // 選択中のオプションを取得
             const fontMode = form.querySelector('input[name="fontMode"]:checked').value;
@@ -628,9 +536,7 @@
             submitBtn.disabled = true;
             submitBtn.style.display = 'none';
             dropZone.style.display = 'none';
-            urlBox.style.display = 'none';
             optionsBox.style.display = 'none';
-            document.querySelector('.source-tabs').style.display = 'none';
             progressSection.style.display = 'block';
             
             // アニメーション開始
@@ -681,23 +587,14 @@
             // サーバー通信 (Fetch API)
             // =========================================
             try {
-                let response;
-                if (sourceMode === 'file') {
-                    const formData = new FormData();
-                    formData.append('file', fileInput.files[0]);
-                    formData.append('fontMode', fontMode);
-                    formData.append('sizeMode', sizeMode);
-                    response = await fetch('/convert', {
-                        method: 'POST',
-                        body: formData
-                    });
-                } else {
-                    response = await fetch('/convert-url', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: urlInput.value, fontMode, sizeMode })
-                    });
-                }
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                formData.append('fontMode', fontMode);
+                formData.append('sizeMode', sizeMode);
+                const response = await fetch('/convert', {
+                    method: 'POST',
+                    body: formData
+                });
 
                 if (!response.ok) throw new Error('Server Error');
 

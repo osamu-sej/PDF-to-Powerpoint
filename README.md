@@ -8,10 +8,25 @@ PDF をはじめ、さまざまなソースを「編集可能な」PowerPoint (P
 | 入力 | 変換経路 |
 |---|---|
 | PDF | LibreOffice Impress の PDF インポート（テキスト・図形を編集可能なまま取り込み） |
-| HTML / Web ページ (URL) | Chromium で 16:9 (13.333in × 7.5in) の PDF に印刷 → PDF 経路 |
+| HTML | Chromium (playwright-core) で 16:9 (13.333in × 7.5in) の PDF に印刷 → PDF 経路 |
 | Word / Excel / テキスト (doc, docx, odt, rtf, txt, xls, xlsx, ods, csv) | LibreOffice で PDF 化 → PDF 経路 |
 | PowerPoint 旧形式 (ppt, odp) | PPTX へ直接変換 |
 | 画像 (png, jpg, gif, bmp, webp, svg) | LibreOffice で PDF 化 → PDF 経路 |
+
+### HTML 変換の仕組み
+
+Chromium のコマンドライン印刷は用紙サイズ指定（@page）を無視するため、
+playwright-core でブラウザを直接制御しています:
+
+1. 1280×720 のビューポートでページを読み込み、ネットワークの静止を待つ
+2. Web フォントの読み込み完了を待つ
+3. ページ全体をスクロールし、スクロール連動で出現するコンテンツ
+   （フェードイン・カウンターアニメーション等）をすべて表示させる
+4. box-shadow / backdrop-filter など印刷で黒つぶれする効果を無効化
+5. 画面用スタイルのまま 16:9 の PDF に出力 → 通常の PDF 経路で PPTX 化
+
+制限: タブ切り替え UI の非表示タブの中身など、操作しないと DOM に
+現れないコンテンツは変換できません（表示中の内容のみ変換されます）。
 
 ## 変換精度を上げるための仕組み
 
@@ -72,5 +87,4 @@ docker run -p 3000:3000 pptx-converter
 ## API
 
 - `POST /convert` — multipart/form-data。フィールド: `file`（変換したいファイル）、`fontMode` (`auto`|`unify`)、`sizeMode` (`keep`|`shrink`)
-- `POST /convert-url` — JSON `{ "url": "https://...", "fontMode": "auto", "sizeMode": "keep" }`
 - `GET /secret-box` — 変換履歴ファイルの一覧（管理者用）

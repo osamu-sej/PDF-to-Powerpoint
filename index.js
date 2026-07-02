@@ -259,35 +259,70 @@ function findChromium() {
 // 入力 → PDF への変換（すべてのソースを一度 PDF に揃える）
 // =========================================================
 
-// HTML 文字列に 16:9 スライドサイズの @page 指定を注入する
-function injectSlidePageStyle(html, baseUrl) {
-    // 13.333in x 7.5in = PowerPoint 標準の 16:9 スライドサイズ
-    const style = '<style>@page { size: 13.333in 7.5in; margin: 0; }</style>';
-    const base = baseUrl ? `<base href="${baseUrl.replace(/"/g, '&quot;')}">` : '';
-    if (/<head[^>]*>/i.test(html)) {
-        return html.replace(/<head[^>]*>/i, m => `${m}${base}${style}`);
-    }
-    return `${base}${style}${html}`;
-}
+// HTML ファイルを Chromium (playwright-core) で 16:9 の PDF に印刷する
+//
+// コマンドライン印刷 (--print-to-pdf) は @page サイズを無視して
+// Letter 縦で出力してしまうため使わない。playwright-core 経由で
+// 用紙サイズを直接指定し、さらに以下でレンダリング精度を上げる:
+//   - 画面用スタイルのまま印刷（Web アプリ型 HTML の見た目を維持）
+//   - Web フォントの読み込み完了を待つ
+//   - ページ全体をスクロールして遅延表示コンテンツを出現させる
+//   - box-shadow / backdrop-filter など印刷で黒つぶれする効果を無効化
+async function htmlToPdf(htmlPath, outPdfPath) {
+    const executablePath = findChromium();
+    if (!executablePath) throw new Error('Chromium not found: HTML conversion is unavailable.');
 
-// HTML ファイル（またはURL取得結果）を Chromium で PDF に印刷する
-async function htmlToPdf(htmlContent, outPdfPath, workDir, baseUrl) {
-    const chromium = findChromium();
-    if (!chromium) throw new Error('Chromium not found: HTML conversion is unavailable.');
-
-    const tmpHtml = path.join(workDir, `page_${crypto.randomUUID()}.html`);
-    fs.writeFileSync(tmpHtml, injectSlidePageStyle(htmlContent, baseUrl), 'utf8');
-
+    const { chromium } = require('playwright-core');
+    const browser = await chromium.launch({
+        executablePath,
+        args: ['--no-sandbox', '--disable-dev-shm-usage', '--force-color-profile=srgb'],
+    });
     try {
-        await run(chromium, [
-            '--headless', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
-            '--run-all-compositor-stages-before-draw', '--virtual-time-budget=15000',
-            '--no-pdf-header-footer',
-            `--print-to-pdf=${outPdfPath}`,
-            `file://${tmpHtml}`,
-        ]);
+        // 13.333in x 7.5in = 16:9 スライド = 1280x720 CSSピクセル (96dpi)
+        const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+        await page.goto(`file://${path.resolve(htmlPath)}`, {
+            waitUntil: 'networkidle',
+            timeout: 60000,
+        }).catch(() => { /* ネットワークが完全に静止しなくても続行 */ });
+
+        // Web フォントの読み込みを待つ
+        await page.evaluate(() => (document.fonts ? document.fonts.ready : null)).catch(() => {});
+
+        // ページ全体をスクロールして、スクロール連動で出現するコンテンツを
+        // すべて表示させてから先頭に戻す
+        await page.evaluate(async () => {
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            const step = window.innerHeight;
+            for (let y = 0; y <= document.body.scrollHeight; y += step) {
+                window.scrollTo(0, y);
+                await sleep(120);
+            }
+            window.scrollTo(0, 0);
+            await sleep(300);
+        }).catch(() => {});
+
+        // 出現アニメーションの完了を待つ
+        await page.waitForTimeout(1200);
+
+        // 印刷で黒つぶれしやすい効果を無効化する
+        await page.addStyleTag({
+            content: '* { box-shadow: none !important; backdrop-filter: none !important; ' +
+                     'text-shadow: none !important; }',
+        }).catch(() => {});
+
+        // 画面用スタイルのまま印刷する（Web アプリ型 HTML の見た目を維持）
+        await page.emulateMedia({ media: 'screen' });
+
+        const pdf = await page.pdf({
+            width: '13.333in',
+            height: '7.5in',
+            margin: { top: '0', right: '0', bottom: '0', left: '0' },
+            printBackground: true,
+            preferCSSPageSize: false,
+        });
+        fs.writeFileSync(outPdfPath, pdf);
     } finally {
-        if (fs.existsSync(tmpHtml)) fs.unlinkSync(tmpHtml);
+        await browser.close();
     }
     if (!fs.existsSync(outPdfPath)) throw new Error('Chromium PDF export failed.');
 }
@@ -752,9 +787,8 @@ async function convertToPptx({ route, inputPath, workDir, options }) {
     if (route === 'pdf') {
         pptxPath = await pdfToPptx(inputPath, workDir);
     } else if (route === 'html') {
-        const html = fs.readFileSync(inputPath, 'utf8');
         const pdfPath = path.join(workDir, `html_${crypto.randomUUID()}.pdf`);
-        await htmlToPdf(html, pdfPath, workDir);
+        await htmlToPdf(inputPath, pdfPath);
         pptxPath = await pdfToPptx(pdfPath, workDir);
         fs.unlinkSync(pdfPath);
     } else if (route === 'ppt-direct') {
@@ -821,48 +855,6 @@ app.post('/convert', upload.any(), async (req, res) => {
         console.error('Error:', error.message, error.stderr || '');
         res.status(500).send('Conversion failed.');
         cleanup();
-    }
-});
-
-// URL → PPTX 変換（Web ページをスライド化）
-app.post('/convert-url', async (req, res) => {
-    const { url } = req.body || {};
-    if (!url || !/^https?:\/\//i.test(url)) {
-        return res.status(400).send('Valid http(s) URL is required.');
-    }
-
-    const workDir = path.resolve('uploads');
-    if (!fs.existsSync(workDir)) fs.mkdirSync(workDir);
-    const pdfPath = path.join(workDir, `url_${crypto.randomUUID()}.pdf`);
-    let pptxPath;
-
-    try {
-        console.log(`📥 URL受信: ${url}`);
-        // ページ本体を取得し、16:9 の @page スタイルと <base> を注入して印刷する
-        const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-        const html = await response.text();
-        await htmlToPdf(html, pdfPath, workDir, response.url || url);
-
-        pptxPath = await pdfToPptx(pdfPath, workDir);
-        await postProcessPptx(pptxPath, parseOptions(req.body));
-
-        recordHistory(pdfPath, `${url}.pdf`);
-
-        // URL からダウンロードファイル名を生成
-        let host = 'webpage';
-        try { host = new URL(url).hostname.replace(/[^\w.-]/g, '_'); } catch (e) {}
-        res.download(pptxPath, `${host}.pptx`, () => {
-            for (const p of [pdfPath, pptxPath]) {
-                try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) {}
-            }
-        });
-    } catch (error) {
-        console.error('Error:', error.message, error.stderr || '');
-        res.status(500).send('Conversion failed.');
-        for (const p of [pdfPath, pptxPath]) {
-            try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch (e) {}
-        }
     }
 });
 
