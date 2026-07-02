@@ -59,6 +59,16 @@ docker build -t pptx-converter .
 docker run -p 3000:3000 pptx-converter
 ```
 
+## バージョン確認
+
+- 画面右下にサーバーで動作中のバージョン（例: `v2.1.0`）が表示されます。
+  デプロイ後に表示が変わらない場合は、まだ旧バージョンが動いています。
+- 変換された PPTX にもバージョンが記録されます
+  （PowerPoint の「ファイル → 情報」等で確認できる作成アプリケーション名が
+  `PPTX Converter 2.1.0` のようになります）。
+- バージョンの定義元は `package.json` の `version` です。**機能を変更したら必ず上げてください。**
+- API: `GET /version` → `{ "version": "2.1.0" }`
+
 ## API
 
 - `POST /convert` — multipart/form-data。フィールド: `file`（変換したいファイル）、`fontMode` (`auto`|`unify`)、`sizeMode` (`keep`|`shrink`)

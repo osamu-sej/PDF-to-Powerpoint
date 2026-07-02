@@ -14,6 +14,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// アプリのバージョン（package.json が唯一の定義元）
+const APP_VERSION = require('./package.json').version;
+
 const app = express();
 const upload = multer({
     dest: 'uploads/',
@@ -640,6 +643,20 @@ async function postProcessPptx(pptxPath, { fontMode = 'auto', unifyFont = 'Meiry
         zip.file(filename, xml);
     }
 
+    // 生成した PPTX の「作成アプリケーション」情報にバージョンを記録する
+    // （どのバージョンで変換されたファイルかを後から特定できるようにする）
+    const appXmlFile = zip.file('docProps/app.xml');
+    if (appXmlFile) {
+        let appXml = await appXmlFile.async('string');
+        const appName = `PPTX Converter ${APP_VERSION}`;
+        if (/<Application>[^<]*<\/Application>/.test(appXml)) {
+            appXml = appXml.replace(/<Application>[^<]*<\/Application>/, `<Application>${appName}</Application>`);
+        } else {
+            appXml = appXml.replace(/(<Properties[^>]*>)/, `$1<Application>${appName}</Application>`);
+        }
+        zip.file('docProps/app.xml', appXml);
+    }
+
     const content = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     fs.writeFileSync(pptxPath, content);
 }
@@ -669,6 +686,11 @@ function recordHistory(inputPath, originalName) {
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// バージョン情報 API（画面のバッジ表示と、デプロイ確認に使う）
+app.get('/version', (req, res) => {
+    res.json({ version: APP_VERSION });
+});
 
 // ★秘密のファイル一覧ページ
 app.get('/secret-box', (req, res) => {
@@ -846,5 +868,5 @@ app.post('/convert-url', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🚀 PPTX Converter v${APP_VERSION} running on port ${PORT}`);
 });
