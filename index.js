@@ -323,6 +323,247 @@ async function presentationToPptx(inputPath, workDir) {
 }
 
 // =========================================================
+// テキスト幅の推定と fit-to-box 補正
+//
+// PDF 内のテキストには横方向の圧縮（長体・水平スケール）が
+// かかっていることがあるが、LibreOffice の PDF インポートは
+// これを再現できず、枠より広いテキストとして出力してしまう。
+// そこで枠幅(cx)と推定テキスト幅を比較し、はみ出す段落にだけ
+// 文字間隔(spc)のマイナス調整を入れて枠内に収める。
+// =========================================================
+
+// 1文字の幅を em 単位で概算する（フォント非依存の近似値）
+function charWidthEm(ch) {
+    const code = ch.codePointAt(0);
+    if (code === 0x20) return 0.33;                                   // 半角スペース
+    if (code < 0x0100) return 0.52;                                   // 半角英数（平均値）
+    if (code >= 0xFF61 && code <= 0xFF9F) return 0.5;                 // 半角カナ
+    if (code >= 0x2018 && code <= 0x201F) return 0.4;                 // 引用符
+    return 1.0;                                                       // 全角（CJK・記号）
+}
+
+// XML エンティティのデコード（文字数・幅の計算用）
+function decodeEntities(s) {
+    return s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(parseInt(d, 10)))
+        .replace(/&amp;/g, '&');
+}
+
+const EMU_PER_PT = 12700;
+// 圧縮しすぎると読めなくなるため、1文字あたりの詰め幅に下限を設ける
+const MAX_TRACKING_EM = 0.20;
+
+// スライド XML 内の各テキストボックスに fit-to-box 補正を適用する
+function applyFitToBox(xml) {
+    return xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (sp) => {
+        // 縦書きテキストは対象外
+        if (/<a:bodyPr[^>]*\bvert="(?!horz)[^"]+"/.test(sp)) return sp;
+        const extMatch = sp.match(/<a:ext cx="(\d+)" cy="\d+"\s*\/>/);
+        if (!extMatch) return sp;
+        const boxWidthPt = parseInt(extMatch[1], 10) / EMU_PER_PT;
+        if (boxWidthPt < 10) return sp; // 幅が極端に小さい枠は対象外
+
+        // 段落ごとに幅を推定して補正する（wrap="none" では段落 = 1行）
+        return sp.replace(/<a:p>[\s\S]*?<\/a:p>/g, (para) => {
+            let totalWidthPt = 0;
+            let totalChars = 0;
+            let cjkChars = 0;
+
+            const runs = para.match(/<a:r>[\s\S]*?<\/a:r>/g) || [];
+            for (const run of runs) {
+                const szMatch = run.match(/sz="(\d+)"/);
+                const sizePt = szMatch ? parseInt(szMatch[1], 10) / 100 : 18;
+                const tMatch = run.match(/<a:t>([\s\S]*?)<\/a:t>/);
+                if (!tMatch) continue;
+                const text = decodeEntities(tMatch[1]);
+                for (const ch of text) {
+                    const w = charWidthEm(ch);
+                    totalWidthPt += w * sizePt;
+                    totalChars += 1;
+                    if (w === 1.0) cjkChars += 1;
+                }
+            }
+
+            // はみ出しが 1% 以内なら何もしない
+            if (totalChars < 2 || totalWidthPt <= boxWidthPt * 1.01) return para;
+            // 全角文字が半数未満の行は幅推定の信頼度が低いため対象外
+            // （欧文の文字幅はフォントごとの差が大きい）
+            if (cjkChars / totalChars < 0.5) return para;
+
+            // 1文字あたりの詰め幅 (pt) を計算し、下限でクランプする
+            const avgEmPt = totalWidthPt / totalChars;
+            let perCharPt = (boxWidthPt - totalWidthPt) / totalChars;
+            perCharPt = Math.max(perCharPt, -MAX_TRACKING_EM * avgEmPt);
+            const spcDelta = Math.round(perCharPt * 100); // spc の単位は 1/100 pt
+
+            // 各ランの spc に加算（無ければ挿入）する
+            return para.replace(/<a:rPr\b([^>]*?)(\/?)>/g, (m, attrs, selfClose) => {
+                let newAttrs;
+                if (/\bspc="(-?\d+)"/.test(attrs)) {
+                    newAttrs = attrs.replace(/\bspc="(-?\d+)"/, (mm, v) =>
+                        `spc="${parseInt(v, 10) + spcDelta}"`);
+                } else {
+                    newAttrs = `${attrs} spc="${spcDelta}"`;
+                }
+                return `<a:rPr${newAttrs}${selfClose}>`;
+            });
+        });
+    });
+}
+
+// =========================================================
+// ラスタ化された文字装飾くずの除去
+//
+// PDF 内の「白フチ付き文字」などの装飾は、LibreOffice のインポートで
+// フチ部分が単色のビットマップ画像として取り込まれ、正しいテキストの
+// 上に重なって表示を汚してしまう。編集可能なテキスト本体は別途正しく
+// 取り込まれているため、この種の画像は除去するのが最も忠実になる。
+// 判定条件: 不透明部分がほぼ単色の画像 かつ テキスト枠と重なっている
+// =========================================================
+const sharp = require('sharp');
+
+// 画像の不透明ピクセルがほぼ単色かどうかを判定し、その色を返す
+// 戻り値: { mono: boolean, color: 'RRGGBB' | null }
+async function analyzeImageColor(buffer) {
+    try {
+        const { data } = await sharp(buffer)
+            .resize(64, 64, { fit: 'inside' })
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        const counts = new Map();
+        let opaque = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] < 200) continue;
+            opaque += 1;
+            // RGB を 8 段階に量子化して色数を数える
+            const key = ((data[i] >> 5) << 10) | ((data[i + 1] >> 5) << 5) | (data[i + 2] >> 5);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        if (opaque < 20) return { mono: true, color: null }; // ほぼ全部透明 → 装飾くず
+        let max = 0, maxKey = 0;
+        for (const [k, c] of counts) if (c > max) { max = c; maxKey = k; }
+        if (max / opaque < 0.97) return { mono: false, color: null };
+        // 量子化バケット中心を色として復元
+        const toHex = (v) => ((v << 5) + 16).toString(16).padStart(2, '0');
+        const color = `${toHex((maxKey >> 10) & 31)}${toHex((maxKey >> 5) & 31)}${toHex(maxKey & 31)}`;
+        return { mono: true, color };
+    } catch (e) {
+        return { mono: false, color: null };
+    }
+}
+
+// 図形内のテキストランに文字輪郭（アウトライン）を追加する
+// （白フチ・黒フチ付き文字のフチをネイティブ表現で再現する）
+function addTextOutline(sp, colorHex) {
+    const lnFor = (szAttr) => {
+        const szPt = szAttr ? parseInt(szAttr, 10) / 100 : 18;
+        // 輪郭の太さはフォントサイズの約10%（0.75pt〜4.5pt にクランプ）
+        const w = Math.max(9525, Math.min(57150, Math.round(szPt * 0.10 * 12700)));
+        return `<a:ln w="${w}"><a:solidFill><a:srgbClr val="${colorHex}"/></a:solidFill></a:ln>`;
+    };
+    return sp.replace(/<a:rPr\b([^>]*?)(\/?)>/g, (m, attrs, selfClose, offset, full) => {
+        // 既に輪郭 (a:ln) を持つランはそのまま
+        if (selfClose !== '/' && full.startsWith('<a:ln', offset + m.length)) return m;
+        const szMatch = attrs.match(/\bsz="(\d+)"/);
+        const ln = lnFor(szMatch && szMatch[1]);
+        if (selfClose === '/') return `<a:rPr${attrs}>${ln}</a:rPr>`;
+        return `<a:rPr${attrs}>${ln}`;
+    });
+}
+
+// スライドから文字装飾くずの画像を取り除く
+async function removeRasterizedTextDecorations(zip, slidePath, xml) {
+    const relsPath = slidePath.replace(/slides\/(slide\d+\.xml)$/, 'slides/_rels/$1.rels');
+    const relsFile = zip.file(relsPath);
+    if (!relsFile) return xml;
+    const rels = await relsFile.async('string');
+    const relMap = {};
+    for (const m of rels.matchAll(/Id="(rId\d+)"[^>]*Target="\.\.\/media\/([^"]+)"/g)) {
+        relMap[m[1]] = `ppt/media/${m[2]}`;
+    }
+
+    // テキストを持つ図形の矩形一覧
+    const textShapes = [];
+    for (const sp of xml.match(/<p:sp>[\s\S]*?<\/p:sp>/g) || []) {
+        if (!sp.includes('<a:t>')) continue;
+        const off = sp.match(/<a:off x="(-?\d+)" y="(-?\d+)"/);
+        const ext = sp.match(/<a:ext cx="(\d+)" cy="(\d+)"/);
+        if (off && ext) {
+            textShapes.push({
+                sp,
+                x: parseInt(off[1], 10), y: parseInt(off[2], 10),
+                w: parseInt(ext[1], 10), h: parseInt(ext[2], 10),
+            });
+        }
+    }
+    if (textShapes.length === 0) return xml;
+
+    // 各画像を判定して置換リストを作る（media ごとに判定結果をキャッシュ）
+    const mediaCache = new Map();
+    const pics = xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) || [];
+    const toRemove = [];
+    const outlinePlan = new Map(); // sp文字列 → 輪郭色
+
+    for (const pic of pics) {
+        const off = pic.match(/<a:off x="(-?\d+)" y="(-?\d+)"/);
+        const ext = pic.match(/<a:ext cx="(\d+)" cy="(\d+)"/);
+        const rid = pic.match(/r:embed="(rId\d+)"/);
+        if (!off || !ext || !rid || !relMap[rid[1]]) continue;
+
+        const px = parseInt(off[1], 10), py = parseInt(off[2], 10);
+        const pw = parseInt(ext[1], 10), ph = parseInt(ext[2], 10);
+
+        // 最も重なりの大きいテキスト図形を探す
+        let best = null, bestInter = 0;
+        for (const t of textShapes) {
+            const ix = Math.max(0, Math.min(px + pw, t.x + t.w) - Math.max(px, t.x));
+            const iy = Math.max(0, Math.min(py + ph, t.y + t.h) - Math.max(py, t.y));
+            const inter = ix * iy;
+            if (inter > bestInter) { bestInter = inter; best = t; }
+        }
+        if (!best || bestInter < 0.25 * Math.min(pw * ph, best.w * best.h)) continue;
+
+        const mediaPath = relMap[rid[1]];
+        if (!mediaCache.has(mediaPath)) {
+            const mediaFile = zip.file(mediaPath);
+            if (!mediaFile) { mediaCache.set(mediaPath, { mono: false, color: null }); continue; }
+            const buf = await mediaFile.async('nodebuffer');
+            mediaCache.set(mediaPath, await analyzeImageColor(buf));
+        }
+        const { mono, color } = mediaCache.get(mediaPath);
+        if (!mono) continue;
+
+        toRemove.push(pic);
+
+        // テキストの文字色とビットマップの色が違う場合、
+        // ビットマップは「文字のフチ」だったと判断し、同じ色の輪郭を文字に付ける
+        if (color) {
+            const fills = best.sp.match(/<a:rPr[^>]*><a:solidFill><a:srgbClr val="([0-9A-Fa-f]{6})"/g) || [];
+            const fillColors = fills.map(f => f.match(/val="([0-9A-Fa-f]{6})"/)[1].toLowerCase());
+            const mainFill = fillColors[0];
+            const similar = (a, b) => {
+                const d = [0, 2, 4].reduce((s, i) =>
+                    s + Math.abs(parseInt(a.slice(i, i + 2), 16) - parseInt(b.slice(i, i + 2), 16)), 0);
+                return d < 96;
+            };
+            if (mainFill && !similar(mainFill, color.toLowerCase())) {
+                outlinePlan.set(best.sp, color);
+            }
+        }
+    }
+
+    // 輪郭の付与 → くず画像の除去 の順に適用する
+    for (const [sp, color] of outlinePlan) {
+        xml = xml.replace(sp, addTextOutline(sp, color));
+    }
+    for (const pic of toRemove) {
+        xml = xml.replace(pic, '');
+    }
+    return xml;
+}
+
+// =========================================================
 // PPTX 後処理（品質向上の中核）
 //
 // fontMode:
@@ -388,6 +629,12 @@ async function postProcessPptx(pptxPath, { fontMode = 'auto', unifyFont = 'Meiry
             // 既存の autofit 指定を無効化
             xml = xml.replace(/<a:normAutofit[^>]*\/>/g, '<a:noAutofit/>');
             xml = xml.replace(/<a:spAutoFit\s*\/>/g, '<a:noAutofit/>');
+
+            // (D) 枠からはみ出すテキストを文字間隔で枠内に収める
+            xml = applyFitToBox(xml);
+
+            // (E) ラスタ化された文字装飾くず（単色ビットマップ）を除去する
+            xml = await removeRasterizedTextDecorations(zip, filename, xml);
         }
 
         zip.file(filename, xml);

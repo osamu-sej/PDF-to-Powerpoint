@@ -1,5 +1,7 @@
-# ベースイメージ（Node.js 20系）
-FROM node:20-bullseye
+# ベースイメージ（Node.js 20系 / Debian 12 bookworm）
+# bookworm は LibreOffice が新しく PDF インポート精度が高い。
+# BIZ UD ゴシック等のフォントパッケージもここから利用できる。
+FROM node:20-bookworm
 
 # 1. システムツールのインストール
 #    - libreoffice        : PDF/Office → PPTX 変換エンジン
@@ -18,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     fonts-noto-core \
     fonts-ipafont \
     fonts-ipaexfont \
+    fonts-morisawa-bizud-gothic \
+    fonts-morisawa-bizud-mincho \
     fonts-liberation2 \
     fonts-crosextra-carlito \
     fonts-crosextra-caladea \
