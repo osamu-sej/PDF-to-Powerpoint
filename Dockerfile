@@ -15,6 +15,8 @@ FROM node:20-bookworm
 RUN apt-get update && apt-get install -y \
     libreoffice \
     chromium \
+    tesseract-ocr \
+    tesseract-ocr-jpn \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-noto-core \
