@@ -1218,6 +1218,30 @@ function attrInt(str, re) {
     return m ? parseInt(m[1], 10) : null;
 }
 
+// XML 内の指定オフセットがグループ図形 <p:grpSp> の内側にあるか
+// （グループ内の <p:pic> は座標が親グループのローカル空間になるため、
+//   スライド空間の EMU で置換すると位置・スケールがずれる。分解対象から外す）
+function isInsideGroup(xml, index) {
+    let depth = 0;
+    const re = /<p:grpSp>|<\/p:grpSp>/g;
+    let m;
+    while ((m = re.exec(xml)) && m.index < index) {
+        depth += m[0] === '</p:grpSp>' ? -1 : 1;
+    }
+    return depth > 0;
+}
+
+// 既存 ZIP エントリと衝突しないメディア名を選ぶ
+// （decomp1.png 等が既に存在すると上書きして無関係な画像を壊すため、
+//   未使用の名前が見つかるまでカウンタを進める）
+function nextMediaName(zip, state) {
+    let name;
+    do {
+        name = `decomp${++state.mediaSeq}.png`;
+    } while (zip.file(`ppt/media/${name}`));
+    return name;
+}
+
 const escapeXml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const hex2 = (v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
 const colorHex = (c) => `${hex2(c.r)}${hex2(c.g)}${hex2(c.b)}`.toUpperCase();
@@ -1262,13 +1286,18 @@ async function processSlide(zip, slidePath, slideW, slideH, state, options) {
         relMap[m[1]] = `ppt/media/${m[2]}`;
     }
 
-    const pics = xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) || [];
+    // グループ内かどうかは、ループ内での xml 書き換えより前（元の xml）で
+    // 確定させる（書き換え後はオフセットがずれるため）
+    const pics = [...xml.matchAll(/<p:pic>[\s\S]*?<\/p:pic>/g)]
+        .map(m => ({ str: m[0], insideGroup: isInsideGroup(xml, m.index) }));
     const slideArea = slideW * slideH;
     let changed = false;
 
-    for (const pic of pics) {
+    for (const { str: pic, insideGroup } of pics) {
         // 回転・反転・トリミングされた画像は対象外（座標変換が複雑になるため）
         if (/<a:xfrm[^>]*(rot|flipH|flipV)=/.test(pic) || /<a:srcRect/.test(pic)) continue;
+        // グループ図形の内側にある画像は座標系が異なるため対象外
+        if (insideGroup) continue;
         const offX = attrInt(pic, /<a:off x="(-?\d+)" y="-?\d+"/);
         const offY = attrInt(pic, /<a:off x="-?\d+" y="(-?\d+)"/);
         const extCx = attrInt(pic, /<a:ext cx="(\d+)" cy="\d+"/);
@@ -1320,7 +1349,7 @@ async function processSlide(zip, slidePath, slideW, slideH, state, options) {
             if (emitImage) {
                 const png = await sharp(p.buf, { raw: { width: p.w, height: p.h, channels: 4 } })
                     .png().toBuffer();
-                const mediaName = `decomp${++state.mediaSeq}.png`;
+                const mediaName = nextMediaName(zip, state);
                 zip.file(`ppt/media/${mediaName}`, png);
                 const newRid = `rId${++maxRid}`;
                 newRels.push(`<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${mediaName}"/>`);
