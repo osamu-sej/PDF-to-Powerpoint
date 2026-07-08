@@ -434,6 +434,11 @@
                     <label><input type="radio" name="sizeMode" value="keep" checked> 原寸を維持（推奨）</label>
                     <label><input type="radio" name="sizeMode" value="shrink"> 一段階小さくする</label>
                 </div>
+                <div class="opt-group">
+                    <span class="opt-label">一枚絵の図解（実験的）</span>
+                    <label><input type="radio" name="decomposeMode" value="auto" checked> パーツに分解する（自動判定）</label>
+                    <label><input type="radio" name="decomposeMode" value="off"> 分解しない</label>
+                </div>
             </details>
 
             <div class="progress-section" id="progressSection">
@@ -531,6 +536,7 @@
             // 選択中のオプションを取得
             const fontMode = form.querySelector('input[name="fontMode"]:checked').value;
             const sizeMode = form.querySelector('input[name="sizeMode"]:checked').value;
+            const decomposeMode = form.querySelector('input[name="decomposeMode"]:checked').value;
 
             // UIの切り替え（ボタン非表示、バー表示）
             submitBtn.disabled = true;
@@ -591,6 +597,7 @@
                 formData.append('file', fileInput.files[0]);
                 formData.append('fontMode', fontMode);
                 formData.append('sizeMode', sizeMode);
+                formData.append('decomposeMode', decomposeMode);
                 const response = await fetch('/convert', {
                     method: 'POST',
                     body: formData

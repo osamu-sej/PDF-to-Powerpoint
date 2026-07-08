@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const JSZip = require('jszip');
 import { fileURLToPath } from 'url';
+import { decomposeFlatImages } from './decompose.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -800,6 +801,13 @@ async function convertToPptx({ route, inputPath, workDir, options }) {
     }
 
     await postProcessPptx(pptxPath, options);
+
+    // 一枚絵（フラット化された図解）のパーツ分解
+    // スライド全面を覆う 1 枚画像を検出した場合のみ動作する付加機能。
+    // 通常のスライドには一切手を触れず、失敗時も従来の結果をそのまま返す。
+    if (options.decomposeMode !== 'off') {
+        await decomposeFlatImages(pptxPath);
+    }
     return pptxPath;
 }
 
@@ -809,6 +817,7 @@ function parseOptions(body = {}) {
         fontMode: body.fontMode === 'unify' ? 'unify' : 'auto',
         unifyFont: typeof body.unifyFont === 'string' && body.unifyFont.trim() ? body.unifyFont.trim() : 'Meiryo UI',
         sizeMode: body.sizeMode === 'shrink' ? 'shrink' : 'keep',
+        decomposeMode: body.decomposeMode === 'off' ? 'off' : 'auto',
     };
 }
 
