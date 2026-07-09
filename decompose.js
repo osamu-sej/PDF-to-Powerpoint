@@ -36,6 +36,8 @@ const { execFile } = require('child_process');
 const sharp = require('sharp');
 const JSZip = require('jszip');
 
+import { analyzeLayout } from './visionLayout.js';
+
 // ---- 分解のチューニングパラメータ ----
 const PIC_AREA_RATIO_MIN = 0.60;   // スライド面積に対する画像の占有率（これ以上で分解候補）
 const MIN_IMAGE_EDGE_PX = 400;     // 分解対象とする画像の最小辺長
@@ -1270,6 +1272,168 @@ function textboxXml(line, id, x, y, cx, cy) {
         `<a:t>${escapeXml(line.text)}</a:t></a:r></a:p></p:txBody></p:sp>`;
 }
 
+// =========================================================
+// v3: Vision シーングラフ → ネイティブ図形＋テキスト＋物体クロップ
+//
+// 画素分解が「画像の断片」しか作れないのに対し、こちらは意味を持った
+// 再構築を行う: パネルは PowerPoint ネイティブ図形（色替え・変形可能）、
+// テキストは正確な文字列の編集可能テキストボックス、写真・アイコンは
+// 元画素の切り出し画像。下地は各要素を消したきれいな背景板。
+// =========================================================
+
+// 矩形の外周リングの平均色を求める（要素を消すときの下地色）
+function ringColor(data, W, H, x0, y0, x1, y1) {
+    let sr = 0, sg = 0, sb = 0, n = 0;
+    const band = 4;
+    const sample = (px, py) => {
+        if (px < 0 || py < 0 || px >= W || py >= H) return;
+        const o = (py * W + px) * 4;
+        sr += data[o]; sg += data[o + 1]; sb += data[o + 2]; n++;
+    };
+    for (let px = x0 - band; px < x1 + band; px += 2) {
+        for (let d = 1; d <= band; d++) { sample(px, y0 - d); sample(px, y1 - 1 + d); }
+    }
+    for (let py = y0 - band; py < y1 + band; py += 2) {
+        for (let d = 1; d <= band; d++) { sample(x0 - d, py); sample(x1 - 1 + d, py); }
+    }
+    if (n === 0) return { r: 255, g: 255, b: 255 };
+    return { r: Math.round(sr / n), g: Math.round(sg / n), b: Math.round(sb / n) };
+}
+
+// 背景板から 1 要素を消す（外周色で塗りつぶす）
+function paintOut(plate, orig, W, H, el) {
+    const x0 = el.x, y0 = el.y, x1 = Math.min(W, el.x + el.w), y1 = Math.min(H, el.y + el.h);
+    const c = ringColor(orig, W, H, x0, y0, x1, y1);
+    for (let y = y0; y < y1; y++) {
+        let o = (y * W + x0) * 4;
+        for (let x = x0; x < x1; x++, o += 4) {
+            plate[o] = c.r; plate[o + 1] = c.g; plate[o + 2] = c.b; plate[o + 3] = 255;
+        }
+    }
+}
+
+// パネル（カード・帯）をネイティブ図形にする
+function panelXml(el, id, x, y, cx, cy) {
+    const geom = el.rounded
+        ? '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 8000"/></a:avLst></a:prstGeom>'
+        : '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>';
+    const fill = el.fill
+        ? `<a:solidFill><a:srgbClr val="${el.fill.replace('#', '')}"/></a:solidFill>`
+        : '<a:noFill/>';
+    const ln = el.border
+        ? `<a:ln w="19050"><a:solidFill><a:srgbClr val="${el.border.replace('#', '')}"/></a:solidFill></a:ln>`
+        : '<a:ln><a:noFill/></a:ln>';
+    return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="図解パネル"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>` +
+        `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+        `${geom}${fill}${ln}</p:spPr></p:sp>`;
+}
+
+// vision が読んだテキストを編集可能なテキストボックスにする
+function sceneTextXml(el, id, x, y, cx, cy) {
+    const hasCjk = /[⺀-鿿぀-ヿ]/.test(el.text);
+    const factor = hasCjk ? 0.92 : 0.74;
+    let pt = (cy / 12700) * factor;
+    // 文字列の推定幅で枠に収める（全角=1em, 半角≈0.55em）
+    let em = 0;
+    for (const ch of el.text) {
+        const code = ch.codePointAt(0);
+        em += code < 0x0100 ? 0.55 : (code >= 0xFF61 && code <= 0xFF9F ? 0.5 : 1.0);
+    }
+    if (em > 0) pt = Math.min(pt, (cx / 12700) / em);
+    pt = Math.max(6, Math.min(96, pt));
+    const sz = Math.round(pt * 100);
+    const bold = el.bold ? ' b="1"' : '';
+    const algn = el.align === 'center' ? 'ctr' : el.align === 'right' ? 'r' : 'l';
+    const color = (el.textColor || '#333333').replace('#', '');
+    return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="図解テキスト"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
+        `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr>` +
+        `<p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="ctr"><a:noAutofit/></a:bodyPr><a:lstStyle/>` +
+        `<a:p><a:pPr algn="${algn}"/><a:r><a:rPr lang="ja-JP" sz="${sz}"${bold} spc="0">` +
+        `<a:solidFill><a:srgbClr val="${color.toUpperCase()}"/></a:solidFill>` +
+        `<a:latin typeface="Meiryo UI"/><a:ea typeface="Meiryo UI"/></a:rPr>` +
+        `<a:t>${escapeXml(el.text)}</a:t></a:r></a:p></p:txBody></p:sp>`;
+}
+
+// シーングラフを図形 XML 群に組み直す
+// 戻り値: { shapes: [xml...], newRels: [relXml...] } / 失敗時 null
+async function buildSceneShapes(scene, imageBuffer, geom, ids, zip, rels, state) {
+    const { offX, offY, extCx, extCy } = geom;
+    // 元画像を生画素で読む（scene.w/h は元画像の実寸）
+    const { data, info } = await sharp(imageBuffer, { limitInputPixels: 268402689 })
+        .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height;
+    const sx = extCx / W, sy = extCy / H;
+    const toEmu = (x, y, w, h) => ({
+        x: offX + Math.round(x * sx), y: offY + Math.round(y * sy),
+        cx: Math.max(1, Math.round(w * sx)), cy: Math.max(1, Math.round(h * sy)),
+    });
+
+    // --- 背景板: モデル化した中身要素だけを消したきれいな下地 ---
+    // パネル（容器）は消さない。内部の未モデル要素はプレートに残り、
+    // モデル済みの中身要素は個別に消してネイティブ図形／テキストへ差し替える。
+    // 消し込みには少しマージンを持たせ、境界ボックスが多少ずれても元の
+    // テキスト・物体が残らないようにする（テキストは背景に余白があるため広め）
+    const plate = Buffer.from(data);
+    for (const el of scene.elements) {
+        if (el.kind === 'panel') continue;
+        const mx = el.kind === 'text' ? Math.round(el.h * 0.25) + 2 : 2;
+        const my = el.kind === 'text' ? Math.round(el.h * 0.45) + 2 : 2;
+        const e2 = {
+            x: Math.max(0, el.x - mx), y: Math.max(0, el.y - my),
+            w: Math.min(W, el.x + el.w + mx) - Math.max(0, el.x - mx),
+            h: Math.min(H, el.y + el.h + my) - Math.max(0, el.y - my),
+        };
+        paintOut(plate, data, W, H, e2);
+    }
+    const shapes = [];
+    const newRels = [];
+    const addImage = async (buf, x, y, w, h, name) => {
+        const png = await sharp(buf).png().toBuffer();
+        const mediaName = nextMediaName(zip, state);
+        zip.file(`ppt/media/${mediaName}`, png);
+        const newRid = `rId${++ids.rid}`;
+        newRels.push(`<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${mediaName}"/>`);
+        const e = toEmu(x, y, w, h);
+        shapes.push(
+            `<p:pic><p:nvPicPr><p:cNvPr id="${++ids.shape}" name="${name}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
+            `<p:blipFill><a:blip r:embed="${newRid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
+            `<p:spPr><a:xfrm><a:off x="${e.x}" y="${e.y}"/><a:ext cx="${e.cx}" cy="${e.cy}"/></a:xfrm>` +
+            `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`
+        );
+    };
+
+    // 背景板（最背面）
+    const platePng = await sharp(plate, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
+    await addImage(platePng, 0, 0, W, H, '図解の背景');
+
+    // --- 各要素を Z 順（背面→前面）で描画 ---
+    const els = scene.elements
+        .map((el, i) => ({ el, i }))
+        .sort((a, b) => (a.el.z - b.el.z) || (a.i - b.i));
+    let textCount = 0, shapeCount = 0, imgCount = 0;
+    for (const { el } of els) {
+        const e = toEmu(el.x, el.y, el.w, el.h);
+        if (el.kind === 'panel') {
+            shapes.push(panelXml(el, ++ids.shape, e.x, e.y, e.cx, e.cy));
+            shapeCount++;
+        } else if (el.kind === 'text' && el.text && el.text.trim()) {
+            shapes.push(sceneTextXml(el, ++ids.shape, e.x, e.y, e.cx, e.cy));
+            textCount++;
+        } else {
+            // photo / icon / logo / decor → 元画素を切り出して配置
+            const x1 = Math.min(W, el.x + el.w), y1 = Math.min(H, el.y + el.h);
+            const cw = x1 - el.x, ch = y1 - el.y;
+            if (cw < 2 || ch < 2) continue;
+            const crop = await sharp(imageBuffer, { limitInputPixels: 268402689 })
+                .extract({ left: el.x, top: el.y, width: cw, height: ch }).png().toBuffer();
+            await addImage(crop, el.x, el.y, cw, ch, `図解${el.kind}`);
+            imgCount++;
+        }
+    }
+    return { shapes, newRels, stats: { textCount, shapeCount, imgCount } };
+}
+
 // スライド 1 枚を処理する。分解した場合は true を返す
 async function processSlide(zip, slidePath, slideW, slideH, state, options) {
     const relsPath = slidePath.replace(/slides\/(slide\d+\.xml)$/, 'slides/_rels/$1.rels');
@@ -1309,10 +1473,42 @@ async function processSlide(zip, slidePath, slideW, slideH, state, options) {
         const mediaFile = zip.file(relMap[rid]);
         if (!mediaFile) continue;
         if (!/\.(png|jpe?g|gif|bmp|tiff?)$/i.test(relMap[rid])) continue;
+        const imgBuf = await mediaFile.async('nodebuffer');
+
+        // 新規 ID の採番用（vision / 画素分解で共有）
+        let maxShapeId = 0;
+        for (const m of xml.matchAll(/\bid="(\d+)"/g)) maxShapeId = Math.max(maxShapeId, parseInt(m[1], 10));
+        let maxRid = 0;
+        for (const m of rels.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, parseInt(m[1], 10));
+
+        // ---- v3: Vision レイアウト解析（利用可能なら最優先）----
+        // ネイティブ図形＋テキスト＋物体クロップに再構築する。
+        // 解析やキーが無ければ null を返し、下の画素分解にフォールバックする。
+        if (options.vision) {
+            let scene = null;
+            try {
+                scene = await analyzeLayout(imgBuf, { apiKey: options.apiKey });
+            } catch (e) { console.warn(`🔮 vision をスキップ: ${e.message}`); }
+            if (scene && scene.elements.length >= 4) {
+                try {
+                    const ids = { shape: maxShapeId, rid: maxRid };
+                    const built = await buildSceneShapes(
+                        scene, imgBuf, { offX, offY, extCx, extCy }, ids, zip, rels, state);
+                    xml = xml.replace(pic, built.shapes.join(''));
+                    rels = rels.replace('</Relationships>', built.newRels.join('') + '</Relationships>');
+                    changed = true;
+                    console.log(`🔮 vision で再構築: ${slidePath} → 図形${built.stats.shapeCount} / ` +
+                        `テキスト${built.stats.textCount} / 画像${built.stats.imgCount}`);
+                    continue; // この pic は完了。次の pic へ
+                } catch (e) {
+                    console.warn(`🔮 vision 再構築に失敗、画素分解へ: ${e.message}`);
+                }
+            }
+        }
 
         let seg;
         try {
-            seg = await segmentImage(await mediaFile.async('nodebuffer'));
+            seg = await segmentImage(imgBuf);
         } catch (e) {
             console.warn(`🧩 分解の解析に失敗 (${relMap[rid]}): ${e.message}`);
             continue;
@@ -1330,12 +1526,6 @@ async function processSlide(zip, slidePath, slideW, slideH, state, options) {
             x: offX + Math.round(p.x0 * sx), y: offY + Math.round(p.y0 * sy),
             cx: Math.max(1, Math.round((p.x1 - p.x0) * sx)), cy: Math.max(1, Math.round((p.y1 - p.y0) * sy)),
         });
-
-        // 既存 ID の最大値を調べて新規 ID を採番する
-        let maxShapeId = 0;
-        for (const m of xml.matchAll(/\bid="(\d+)"/g)) maxShapeId = Math.max(maxShapeId, parseInt(m[1], 10));
-        let maxRid = 0;
-        for (const m of rels.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, parseInt(m[1], 10));
 
         const newShapes = [];
         const newRels = [];
@@ -1394,7 +1584,7 @@ async function processSlide(zip, slidePath, slideW, slideH, state, options) {
 // エントリポイント: PPTX 内の全スライドを対象に分解を試みる
 // 既存機能を壊さないため、どんな失敗でも例外を外に漏らさない
 // =========================================================
-export async function decomposeFlatImages(pptxPath, { ocr = true } = {}) {
+export async function decomposeFlatImages(pptxPath, { ocr = true, vision = false, apiKey } = {}) {
     try {
         const zip = await JSZip.loadAsync(fs.readFileSync(pptxPath));
 
@@ -1413,7 +1603,7 @@ export async function decomposeFlatImages(pptxPath, { ocr = true } = {}) {
         const state = { mediaSeq: 0 };
         let anyChanged = false;
         for (const slidePath of slidePaths) {
-            if (await processSlide(zip, slidePath, slideW, slideH, state, { ocr })) anyChanged = true;
+            if (await processSlide(zip, slidePath, slideW, slideH, state, { ocr, vision, apiKey })) anyChanged = true;
         }
         if (!anyChanged) return;
 
