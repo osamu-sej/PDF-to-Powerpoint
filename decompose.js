@@ -62,7 +62,9 @@ const OCR_MIN_LINE_CONF = 82;      // 行の平均確信度がこれ未満なら
 const OCR_MIN_COVERAGE = 0.45;     // 採用行の面積がパーツ面積のこれ未満なら不採用（読み漏らし防止）
 const OCR_MIN_PART_H = 12;         // OCR にかけるパーツの最小高さ (px)（小さすぎると誤読が増える）
 const OCR_MAX_PARTS = 120;         // 1画像あたりの OCR 試行数上限
-const OCR_TOTAL_BUDGET_MS = 120000;// 1画像あたりの OCR 合計時間の上限
+// 1画像あたりの OCR 合計時間の上限。低速なサーバー（Render 無料枠など）では
+// ゲートウェイのタイムアウトに合わせて OCR_BUDGET_MS 環境変数で短縮できる
+const OCR_TOTAL_BUDGET_MS = parseInt(process.env.OCR_BUDGET_MS, 10) || 120000;
 const OCR_CONCURRENCY = 4;         // tesseract の並列実行数
 
 // =========================================================
@@ -1145,8 +1147,7 @@ async function ocrBatch(items, tmpDir) {
 // 認識した行は既存の安全ゲート（再描画照合・丸バッジ検出）を通し、
 // 所有パーツから画素を消してテキストボックスに置き換える。
 // =========================================================
-const PADDLE_UPSCALE = 3;          // 認識精度のための拡大率
-const PADDLE_MAX_EDGE = 6000;      // 拡大後の最大辺長（メモリ保護）
+const PADDLE_MAX_EDGE = 4000;      // OCR に渡す最大辺長（メモリ保護。超過分は縮小）
 const PADDLE_MIN_CONF = 0.70;      // 行の最低確信度
 const PADDLE_BACKPLATE_CONF = 0.90;// 背景板上の行は照合できないため高めに要求
 
@@ -1176,13 +1177,16 @@ function normalizeCjkVariants(text) {
     return out;
 }
 
-// 作業画像を拡大して PP-OCRv5 にかけ、作業画像座標の行一覧を返す
+// 作業画像を PP-OCRv5 にかけ、作業画像座標の行一覧を返す。
+// 拡大はしない（検出は engine 側で長辺960px相当、認識は行クロップだけを
+// engine 側で3倍拡大するため、ここで全体を拡大してもメモリを食うだけ）。
+// 巨大画像だけはメモリ保護のため縮小して渡す
 async function runPaddle(seg) {
     const { workData, workW, workH } = seg;
-    let scale = PADDLE_UPSCALE;
-    while (Math.max(workW, workH) * scale > PADDLE_MAX_EDGE && scale > 1) scale--;
-    const png = await sharp(workData, { raw: { width: workW, height: workH, channels: 4 } })
-        .resize({ width: workW * scale, kernel: 'lanczos3' })
+    const scale = Math.min(1, PADDLE_MAX_EDGE / Math.max(workW, workH));
+    let pipe = sharp(workData, { raw: { width: workW, height: workH, channels: 4 } });
+    if (scale < 1) pipe = pipe.resize({ width: Math.round(workW * scale), kernel: 'lanczos3' });
+    const png = await pipe
         .flatten({ background: '#ffffff' })
         .png().toBuffer();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decomp_paddle_'));
@@ -1523,12 +1527,16 @@ async function ocrPartsPaddle(seg) {
 // 第一候補はオフライン PP-OCRv5（高精度・無料）。使えない環境では
 // tesseract のバッチ方式にフォールバックする
 export async function ocrParts(seg) {
+    const started = Date.now();
     if (await isPaddleAvailable()) {
         try {
             await ocrPartsPaddle(seg);
             return;
         } catch (e) {
             console.warn(`🔤 PP-OCRv5 に失敗、tesseract へ: ${e.message}`);
+            // 時間を使い切った失敗（タイムアウト等）のときは、tesseract で
+            // さらに時間を重ねず OCR なし（分解のみ）で返す
+            if (Date.now() - started > OCR_TOTAL_BUDGET_MS / 2) return;
         }
     }
     await ocrPartsTesseract(seg);
