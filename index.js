@@ -46,7 +46,11 @@ const EXT_ROUTES = {
     '.doc':  'office', '.docx': 'office', '.odt': 'office', '.rtf': 'office', '.txt': 'office',
     '.xls':  'office', '.xlsx': 'office', '.ods': 'office', '.csv': 'office',
     '.ppt':  'ppt-direct', '.odp': 'ppt-direct',
-    '.png':  'office', '.jpg': 'office', '.jpeg': 'office', '.gif': 'office', '.bmp': 'office', '.webp': 'office', '.svg': 'office',
+    // ラスタ画像は余白なしの原寸 PDF を自前生成する（'image' 経路）。
+    // LibreOffice に PDF 化させると A4 縦ページの中央に余白付きで置かれ、
+    // スライドに占める画像の割合が下がって一枚絵分解が発動しなくなるため。
+    '.png':  'image', '.jpg': 'image', '.jpeg': 'image', '.gif': 'image', '.bmp': 'image', '.webp': 'image',
+    '.svg':  'office', // SVG はベクタのまま LibreOffice に変換させる
 };
 
 // 保存用フォルダがなければ作成
@@ -326,6 +330,58 @@ async function htmlToPdf(htmlPath, outPdfPath) {
         await browser.close();
     }
     if (!fs.existsSync(outPdfPath)) throw new Error('Chromium PDF export failed.');
+}
+
+// ラスタ画像 → 余白なし・原寸ページの PDF を直接生成する
+// （LibreOffice 経由だと A4 縦の中央に余白付きで置かれてしまう。
+//   ページ比率 = 画像比率にすることで、変換後のスライドを画像が
+//   全面で覆い、一枚絵分解の対象として検出される）
+async function imageToPdf(inputPath, workDir) {
+    const zlib = require('zlib');
+    const img = sharp(inputPath, { limitInputPixels: 268402689 });
+    // アルファは白地に合成して RGB の生画素にする
+    const { data, info } = await img.flatten({ background: '#ffffff' })
+        .removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height;
+    const rawStream = zlib.deflateSync(data, { level: 6 });
+
+    // 最小構成の PDF（1 ページ + FlateDecode の RGB 画像 XObject）
+    const objs = [
+        `<< /Type /Catalog /Pages 2 0 R >>`,
+        `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] ` +
+            `/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
+    ];
+    const imgDict = `<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} ` +
+        `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${rawStream.length} >>`;
+    const content = Buffer.from(`q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`);
+
+    const chunks = [];
+    let pos = 0;
+    const push = (buf) => { chunks.push(buf); pos += buf.length; };
+    const offsets = [0];
+    const beginObj = (n) => { offsets[n] = pos; push(Buffer.from(`${n} 0 obj\n`)); };
+    const endObj = () => push(Buffer.from('\nendobj\n'));
+    push(Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n', 'latin1'));
+    for (let i = 0; i < 3; i++) { beginObj(i + 1); push(Buffer.from(objs[i])); endObj(); }
+    beginObj(4);
+    push(Buffer.from(imgDict + '\nstream\n'));
+    push(rawStream);
+    push(Buffer.from('\nendstream'));
+    endObj();
+    beginObj(5);
+    push(Buffer.from(`<< /Length ${content.length} >>\nstream\n`));
+    push(content);
+    push(Buffer.from('\nendstream'));
+    endObj();
+    const xrefPos = pos;
+    let xref = 'xref\n0 6\n0000000000 65535 f \n';
+    for (let n = 1; n <= 5; n++) xref += String(offsets[n]).padStart(10, '0') + ' 00000 n \n';
+    push(Buffer.from(xref + `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`));
+
+    const pdfPath = path.join(workDir, `image_${crypto.randomUUID()}.pdf`);
+    fs.writeFileSync(pdfPath, Buffer.concat(chunks));
+    return pdfPath;
 }
 
 // Office 文書・画像などを LibreOffice で PDF に変換する
@@ -794,7 +850,11 @@ async function convertToPptx({ route, inputPath, workDir, options }) {
         fs.unlinkSync(pdfPath);
     } else if (route === 'ppt-direct') {
         pptxPath = await presentationToPptx(inputPath, workDir);
-    } else { // office (Word / Excel / 画像 など)
+    } else if (route === 'image') { // ラスタ画像 → 原寸 PDF → PDF 経路
+        const pdfPath = await imageToPdf(inputPath, workDir);
+        pptxPath = await pdfToPptx(pdfPath, workDir);
+        fs.unlinkSync(pdfPath);
+    } else { // office (Word / Excel / SVG など)
         const pdfPath = await officeToPdf(inputPath, workDir);
         pptxPath = await pdfToPptx(pdfPath, workDir);
         fs.unlinkSync(pdfPath);
