@@ -11,7 +11,8 @@ PDF をはじめ、さまざまなソースを「編集可能な」PowerPoint (P
 | HTML | Chromium (playwright-core) で 16:9 (13.333in × 7.5in) の PDF に印刷 → PDF 経路 |
 | Word / Excel / テキスト (doc, docx, odt, rtf, txt, xls, xlsx, ods, csv) | LibreOffice で PDF 化 → PDF 経路 |
 | PowerPoint 旧形式 (ppt, odp) | PPTX へ直接変換 |
-| 画像 (png, jpg, gif, bmp, webp, svg) | LibreOffice で PDF 化 → PDF 経路 |
+| ラスタ画像 (png, jpg, gif, bmp, webp) | 余白なし・原寸ページの PDF を自前生成 → PDF 経路（スライドの縦横比は画像に一致し、一枚絵の図解なら自動で分解対象になる） |
+| SVG | LibreOffice で PDF 化 → PDF 経路 |
 
 ### HTML 変換の仕組み
 
