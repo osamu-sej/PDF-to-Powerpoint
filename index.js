@@ -867,8 +867,14 @@ async function convertToPptx({ route, inputPath, workDir, options }) {
     // 通常のスライドには一切手を触れず、失敗時も従来の結果をそのまま返す。
     // OCR は完全オフラインの PP-OCRv5（無ければ tesseract）を使う。
     // 外部 API・課金要素は一切無い。
+    // 分解はあくまで付加機能: 何が起きても変換全体は失敗させず、
+    // 通常の変換結果をそのまま返す
     if (options.decomposeMode !== 'off') {
-        await decomposeFlatImages(pptxPath, { ocr: options.decomposeMode !== 'parts' });
+        try {
+            await decomposeFlatImages(pptxPath, { ocr: options.decomposeMode !== 'parts' });
+        } catch (e) {
+            console.warn(`🧩 一枚絵分解をスキップ（変換自体は継続）: ${e.message}`);
+        }
     }
     return pptxPath;
 }
