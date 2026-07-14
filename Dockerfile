@@ -15,6 +15,8 @@ FROM node:20-bookworm
 RUN apt-get update && apt-get install -y \
     libreoffice \
     chromium \
+    python3 \
+    python3-pip \
     tesseract-ocr \
     tesseract-ocr-jpn \
     fonts-noto-cjk \
@@ -28,8 +30,15 @@ RUN apt-get update && apt-get install -y \
     fonts-crosextra-carlito \
     fonts-crosextra-caladea \
     fonts-dejavu \
+    libgl1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# 1.5 オフライン OCR エンジン（PP-OCRv5 / onnxocr）
+#     一枚絵の図解のテキスト化に使用。モデル同梱・完全オフライン・無料
+#     （Apache-2.0）。外部 API・課金は一切不要。
+#     入らない環境でも tesseract に自動フォールバックするため必須ではない。
+RUN pip3 install --no-cache-dir --break-system-packages onnxocr
 
 # 2. 作業ディレクトリ作成
 WORKDIR /app

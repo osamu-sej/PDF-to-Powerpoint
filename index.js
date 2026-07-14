@@ -805,6 +805,8 @@ async function convertToPptx({ route, inputPath, workDir, options }) {
     // 一枚絵（フラット化された図解）のパーツ分解 + OCR テキスト化
     // スライド全面を覆う 1 枚画像を検出した場合のみ動作する付加機能。
     // 通常のスライドには一切手を触れず、失敗時も従来の結果をそのまま返す。
+    // OCR は完全オフラインの PP-OCRv5（無ければ tesseract）を使う。
+    // 外部 API・課金要素は一切無い。
     if (options.decomposeMode !== 'off') {
         await decomposeFlatImages(pptxPath, { ocr: options.decomposeMode !== 'parts' });
     }
