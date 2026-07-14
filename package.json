@@ -1,7 +1,7 @@
 {
   "name": "pdf-to-pptx-converter-pro",
   "private": true,
-  "version": "2.5.0",
+  "version": "2.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,6 @@
     "convert": "node index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
     "@google/genai": "latest",
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.2.3",
