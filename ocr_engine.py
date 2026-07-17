@@ -9,20 +9,31 @@
 #   検出モデルは内部で長辺 960px に縮小して走るため、画像全体を
 #   拡大して渡してもメモリを浪費するだけで検出結果は変わらない。
 #   そこで検出は原寸のまま行い、認識(rec)に渡す行クロップだけを
-#   Lanczos で 3 倍拡大する。全体拡大と同等の認識精度のまま、
-#   巨大な中間画像（数百 MB）を持たなくて済む。
+#   Lanczos で拡大する。
+#
+# 誤読対策:
+#   - 検出枠は行末の文字を欠くことがあるため、行高に応じて左右に
+#     広げてから認識する（隣の行があればその手前まで）
+#   - 同じクロップを 3 倍と 1.5 倍の 2 スケールで認識し、両方の
+#     読みを返す。呼び出し側は「2 つの読みが一致するか」を
+#     誤読検出のシグナルとして使う（劣化画像の誤読はスケールに
+#     敏感で、正しい読みはスケールに安定している）
 #
 # 使い方:
 #   python3 ocr_engine.py --probe        → エンジンが使えるか確認（"ok" を出力）
 #   python3 ocr_engine.py <image.png>    → JSON を stdout に出力
 #
 # 出力形式（入力画像のピクセル座標）:
-#   {"lines": [{"x0":..,"y0":..,"x1":..,"y1":..,"text":"..","conf":0.97}, ...]}
+#   {"lines":[{x0,y0,x1,y1,text,conf,text2,conf2}, ...]}
+#   text/conf は 3 倍スケールの読み、text2/conf2 は 1.5 倍の読み
 # =========================================================
 import sys
 import json
 
-UPSCALE = 3  # 認識クロップの拡大率（小さい日本語・小書きかな対策）
+UPSCALE_MAIN = 3.0   # 主認識スケール
+UPSCALE_ALT = 1.5    # 照合用の副認識スケール
+EXPAND_X = 0.35      # 検出枠の左右拡張（行高比）
+EXPAND_Y = 0.10      # 検出枠の上下拡張（行高比）
 
 
 def main() -> int:
@@ -41,17 +52,14 @@ def main() -> int:
             return 1
 
     import contextlib
-    import copy
     import cv2
     import onnxruntime
     from onnxocr.onnx_paddleocr import ONNXPaddleOcr
     from onnxocr.predict_base import PredictBase
     from onnxocr.predict_system import sorted_boxes
-    from onnxocr.utils import get_rotate_crop_image
 
-    # onnxruntime のメモリアリーナは推論の中間テンソルを解放せず
-    # 抱え込み、RSS を数百 MB 押し上げる。小さなサーバー（512MB 級）で
-    # OOM になるため、アリーナを無効化した省メモリセッションに差し替える
+    # onnxruntime のメモリアリーナは中間テンソルを抱え込み RSS を
+    # 数百 MB 押し上げるため無効化する（512MB 級サーバー対策）
     def _low_mem_session(self, model_dir, use_gpu):
         so = onnxruntime.SessionOptions()
         so.enable_cpu_mem_arena = False
@@ -63,36 +71,72 @@ def main() -> int:
     if img is None:
         print(json.dumps({"error": f"cannot read image: {sys.argv[1]}"}))
         return 1
+    H, W = img.shape[:2]
 
-    # ライブラリが stdout に出す注意書きで JSON を汚さないよう stderr へ退避する
     with contextlib.redirect_stdout(sys.stderr):
-        # PP-OCRv5（既定モデル）。角度分類は水平レイアウトの図解では不要
         model = ONNXPaddleOcr(use_angle_cls=False, use_gpu=False)
-        # 検出は原寸（内部で長辺960pxに縮小される）
         dt_boxes = model.text_detector(img)
-        lines = []
-        if dt_boxes is not None and len(dt_boxes) > 0:
-            dt_boxes = sorted_boxes(dt_boxes)
-            crops = []
-            for box in dt_boxes:
-                crop = get_rotate_crop_image(img, copy.deepcopy(box))
-                if crop is None or crop.size == 0:
-                    crop = img[0:1, 0:1]
-                # 認識精度のためクロップだけを拡大する
-                crop = cv2.resize(crop, None, fx=UPSCALE, fy=UPSCALE,
-                                  interpolation=cv2.INTER_LANCZOS4)
-                crops.append(crop)
-            rec_res = model.text_recognizer(crops)
-            for box, (text, conf) in zip(dt_boxes, rec_res):
-                if conf < 0.5:  # predict_system の drop_score と同じ既定値
+
+    lines = []
+    if dt_boxes is not None and len(dt_boxes) > 0:
+        dt_boxes = sorted_boxes(dt_boxes)
+        # 軸平行の矩形に落とす（水平レイアウトの図解が対象）
+        rects = []
+        for box in dt_boxes:
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            rects.append([int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))])
+
+        # 左右拡張: 同じ行帯にある隣の枠の手前まで
+        def y_overlap(a, b):
+            iv = min(a[3], b[3]) - max(a[1], b[1])
+            return iv / max(1, min(a[3] - a[1], b[3] - b[1]))
+
+        expanded = []
+        for i, r in enumerate(rects):
+            h = max(1, r[3] - r[1])
+            ex = int(h * EXPAND_X)
+            ey = int(h * EXPAND_Y)
+            left_lim, right_lim = 0, W
+            for j, q in enumerate(rects):
+                if i == j or y_overlap(r, q) < 0.5:
                     continue
-                xs = [p[0] for p in box]
-                ys = [p[1] for p in box]
-                lines.append({
-                    "x0": int(min(xs)), "y0": int(min(ys)),
-                    "x1": int(max(xs)), "y1": int(max(ys)),
-                    "text": text, "conf": round(float(conf), 4),
-                })
+                if q[2] <= r[0]:
+                    left_lim = max(left_lim, q[2] + 2)
+                if q[0] >= r[2]:
+                    right_lim = min(right_lim, q[0] - 2)
+            x0 = max(left_lim, r[0] - ex)
+            x1 = min(right_lim, r[2] + ex)
+            if x1 <= x0:
+                x0, x1 = r[0], r[2]
+            y0 = max(0, r[1] - ey)
+            y1 = min(H, r[3] + ey)
+            expanded.append([x0, y0, x1, y1])
+
+        crops = []
+        for (x0, y0, x1, y1) in expanded:
+            crop = img[y0:y1, x0:x1]
+            if crop.size == 0:
+                crop = img[0:1, 0:1]
+            crops.append(crop)
+
+        def rec_at(scale):
+            ups = [cv2.resize(c, None, fx=scale, fy=scale,
+                              interpolation=cv2.INTER_LANCZOS4) for c in crops]
+            with contextlib.redirect_stdout(sys.stderr):
+                return model.text_recognizer(ups)
+
+        r_main = rec_at(UPSCALE_MAIN)
+        r_alt = rec_at(UPSCALE_ALT)
+
+        for (x0, y0, x1, y1), (t3, c3), (t2, c2) in zip(expanded, r_main, r_alt):
+            if not t3 or c3 < 0.5:
+                continue
+            lines.append({
+                "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+                "text": t3, "conf": round(float(c3), 4),
+                "text2": t2, "conf2": round(float(c2), 4),
+            })
     print(json.dumps({"lines": lines}, ensure_ascii=False))
     return 0
 
