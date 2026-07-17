@@ -1056,6 +1056,43 @@ function fillHoles(part, lines) {
 // （テキストボックスに置き換わる部分。バッジ等の読めなかった部分は
 //   画像として残す）。残ったインクが無ければ画像ごと省略できるので
 //   その判定結果を返す
+// 行のインクマスク（作業画像座標）+ 膨張2px だけを透明化する。
+// 矩形ごと消すと、行間が詰まった図解で隣の行（画像のまま残す行）の
+// 上下端まで巻き込んで消してしまうため、実際の文字画素だけを消す
+function clearInkMasks(part, entries) {
+    const R = 3;
+    for (const e of entries) {
+        const x0 = Math.max(0, Math.floor(e.x0) - part.x), x1 = Math.min(part.w, Math.ceil(e.x1) - part.x);
+        const y0 = Math.max(0, Math.floor(e.y0) - part.y), y1 = Math.min(part.h, Math.ceil(e.y1) - part.y);
+        for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+                // 近傍 R px にこの行のインクがあれば消す
+                let hit = false;
+                for (let dy = -R; dy <= R && !hit; dy++) {
+                    for (let dx = -R; dx <= R; dx++) {
+                        if (e.isInk(part.x + x + dx, part.y + y + dy)) { hit = true; break; }
+                    }
+                }
+                if (!hit) continue;
+                const o = (y * part.w + x) * 4;
+                part.buf[o] = 0; part.buf[o + 1] = 0; part.buf[o + 2] = 0; part.buf[o + 3] = 0;
+            }
+        }
+    }
+    // 消した後に残るインク（バッジ・図記号など）があるか
+    const bg = part.levelBg || { r: 255, g: 255, b: 255 };
+    let remain = 0;
+    for (let y = 0; y < part.h; y++) {
+        for (let x = 0; x < part.w; x++) {
+            const o = (y * part.w + x) * 4;
+            if (part.buf[o + 3] === 0) continue;
+            const d = Math.abs(part.buf[o] - bg.r) + Math.abs(part.buf[o + 1] - bg.g) + Math.abs(part.buf[o + 2] - bg.b);
+            if (d > COLOR_DIST_T * 0.7) remain++;
+        }
+    }
+    return remain >= 25;
+}
+
 function clearLines(part, lines) {
     const bg = part.levelBg || { r: 255, g: 255, b: 255 };
     let remain = 0;
@@ -1170,10 +1207,35 @@ const CJK_VARIANT_MAP = {
     '头': '頭', '实': '実', '买': '買', '卖': '売', '读': '読', '风': '風',
     '气': '気', '团': '団', '图': '図', '难': '難', '开': '開', '关': '関',
     '时': '時', '产': '産', '发': '発', '值': '値', '别': '別', '识': '識',
+    '题': '題', '规': '規', '输': '輸', '录': '録', '资': '資', '价': '価',
+    '佰': '価', '设': '設', '经': '経', '济': '済', '结': '結', '给': '給',
+    '乘': '乗', '调': '調', '查': '査', '带': '帯', '费': '費', '订': '訂',
+    '电': '電', '渔': '漁', '习': '習', '车': '車', '农': '農', '增': '増',
+    '錄': '録', '壳': '売', 'Å': 'A',
 };
+// 拗音の大書き（じや→じゃ 等）: OCR が小書きかなを大きく読む誤りを
+// 正す。正しい語が存在しうる組（みや・しや・きよ・リユ 等）は含めない
+const SMALL_KANA_FIXES = [
+    ['じや', 'じゃ'], ['じゆ', 'じゅ'], ['じよ', 'じょ'],
+    ['ぎや', 'ぎゃ'], ['ぎゆ', 'ぎゅ'], ['ぎよ', 'ぎょ'],
+    ['びや', 'びゃ'], ['びゆ', 'びゅ'], ['びよ', 'びょ'],
+    ['ぴや', 'ぴゃ'], ['ぴゆ', 'ぴゅ'], ['ぴよ', 'ぴょ'],
+    ['にゆ', 'にゅ'], ['りゆ', 'りゅ'],
+    ['シユ', 'シュ'], ['ジユ', 'ジュ'], ['チユ', 'チュ'], ['ニユ', 'ニュ'],
+    ['ビユ', 'ビュ'], ['ピユ', 'ピュ'], ['ギユ', 'ギュ'],
+    ['シヤ', 'シャ'], ['ジヤ', 'ジャ'], ['チヤ', 'チャ'],
+    ['シヨ', 'ショ'], ['ジヨ', 'ジョ'],
+];
 function normalizeCjkVariants(text) {
     let out = '';
     for (const ch of text) out += CJK_VARIANT_MAP[ch] || ch;
+    for (const [a, b] of SMALL_KANA_FIXES) out = out.split(a).join(b);
+    // 桁区切りのカンマをピリオドと読み違えたもの（3.029 → 3,029）
+    out = out.replace(/(\d)\.(\d{3})(?!\d)/g, '$1,$2');
+    // 単語として存在しない誤読の複合語補正
+    out = out.replace(/亮上/g, '売上').replace(/を防く/g, 'を防ぐ');
+    // 引用符・約物の直後の小書きかなは大書きの誤読（"ゃ → "や）
+    out = out.replace(/([”“"'、。・])([ゃゅょっ])/g, (m, a, b) => a + ({'ゃ':'や','ゅ':'ゆ','ょ':'よ','っ':'つ'}[b]));
     return normalizeKanaConfusions(out);
 }
 
@@ -1191,6 +1253,8 @@ function normalizeKanaConfusions(text) {
         const prev = chars[i - 1], next = chars[i + 1];
         // カタカナ「ヘ」が助詞として使われている（次がひらがな）→ ひらがな「へ」
         if (cur === 'ヘ' && isHira(next)) { chars[i] = 'へ'; continue; }
+        // 長音符「ー」がひらがなに挟まれている（例: のーつ）→ 漢字「一」
+        if (cur === 'ー' && isHira(prev) && isHira(next)) { chars[i] = '一'; continue; }
         const rep = KANA_CONFUSION[cur];
         if (!rep) continue;
         // 前がカタカナで、次が漢字でない（例: レポー下・ → レポート・, デー夕を → データを）
@@ -1226,11 +1290,20 @@ async function runPaddle(seg) {
         });
         const parsed = JSON.parse(stdout);
         if (!parsed.lines) throw new Error(parsed.error || 'no lines');
+        // 2 スケールの読みが（表記ゆれの正規化後に）一致するかを
+        // 誤読検出のシグナルとして持たせる。句読点・中黒などの違いは
+        // 誤読とはみなさない
+        const agreeKey = (s) => normalizeCjkVariants(String(s || ''))
+            .replace(/[\s・。、，,.．·•‧:：;；]/g, '')
+            .replace(/[一ー]/g, '一') // 一/ー は字形同一なので不一致とみなさない
+            .replace(/^[0-9①-⑳Ⓐ-ⓏA-Z]{1,2}/, ''); // 先頭バッジの有無の違いも許容
         return parsed.lines.map(l => ({
             x0: l.x0 / scale, y0: l.y0 / scale,
             x1: l.x1 / scale, y1: l.y1 / scale,
             text: normalizeCjkVariants(String(l.text || '')).trim(),
             conf: l.conf,
+            agree: agreeKey(l.text) === agreeKey(l.text2),
+            conf2: l.conf2 || 0,
         }));
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1245,17 +1318,23 @@ function overlapArea(a, part) {
 }
 
 // 作業画像そのものから行のインク判定を作る
-// 行の外周リング色を下地とみなし、そこから離れた画素をインクとする。
 // CV 分解の結果（パーツ分割）に依存しないので、行が複数パーツに
-// またがっていても正しく照合できる
+// またがっていても正しく照合できる。
+//   - しきい値は矩形内のコントラストに適応させる（圧縮でにじんだ
+//     小さい文字のハローを глиф に含めない）
+//   - 白抜き行（帯の上の白文字）は「インク」多数派のチャネル中央値を
+//     帯色とみなして反転する（最頻ビンは帯のグラデーションで分裂する）
+//   - 縁に接する棒状成分（枠線・罫線・グラフ軸）はマスクから除去する
 function makeWorkInkTester(seg, rect) {
     const { workData: data, workW: W, workH: H } = seg;
     const m = 2;
     const x0 = Math.max(0, Math.floor(rect.x0) - m), x1 = Math.min(W, Math.ceil(rect.x1) + m);
     const y0 = Math.max(0, Math.floor(rect.y0) - m), y1 = Math.min(H, Math.ceil(rect.y1) + m);
-    // リング画素は 4bit 量子化ヒストグラムの最頻色ビンの平均を下地色とする。
-    // 単純平均だと、行の直下に枠線や隣接要素があるとき混合色になり、
-    // 本来の下地画素まで「インク」と誤判定して照合を壊してしまう
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) {
+        return { isInk: () => false, ring: { r: 255, g: 255, b: 255 }, x0, y0, x1, y1, inverse: false };
+    }
+    // 外周リングの最頻色（4bit 量子化）を下地色の初期推定にする
     const bins = new Map();
     const sample = (px, py) => {
         if (px < 0 || py < 0 || px >= W || py >= H) return;
@@ -1270,99 +1349,250 @@ function makeWorkInkTester(seg, rect) {
     for (let py = y0; py < y1; py += 2) { sample(x0 - 2, py); sample(x1 + 1, py); }
     let top = null;
     for (const e of bins.values()) if (!top || e.n > top.n) top = e;
-    const ring = top
+    let ring = top
         ? { r: Math.round(top.r / top.n), g: Math.round(top.g / top.n), b: Math.round(top.b / top.n) }
         : { r: 255, g: 255, b: 255 };
-    const isInk = (x, y) => {
-        if (x < 0 || y < 0 || x >= W || y >= H) return false;
+
+    const dist = (x, y, rc) => {
         const o = (y * W + x) * 4;
-        const d = Math.abs(data[o] - ring.r) + Math.abs(data[o + 1] - ring.g) + Math.abs(data[o + 2] - ring.b);
-        return d > 70;
+        return Math.abs(data[o] - rc.r) + Math.abs(data[o + 1] - rc.g) + Math.abs(data[o + 2] - rc.b);
     };
-    return { isInk, ring, x0, y0, x1, y1 };
+    // 適応しきい値: 矩形内の距離分布の 95 パーセンタイルに比例させる
+    const adaptiveMask = (rc) => {
+        const ds = new Array(w * h);
+        let i = 0;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ds[i++] = dist(x, y, rc);
+        const sorted = Array.from(ds).sort((a, b) => a - b);
+        const d95 = sorted[Math.floor(sorted.length * 0.95)];
+        const thr = Math.max(70, d95 * 0.55);
+        const mask = new Uint8Array(w * h);
+        let ink = 0;
+        for (let j = 0; j < w * h; j++) if (ds[j] > thr) { mask[j] = 1; ink++; }
+        return { mask, ink };
+    };
+    let { mask, ink } = adaptiveMask(ring);
+    let inverse = false;
+    if (ink > w * h * 0.55) {
+        // 多数派（帯）のチャネル中央値を下地にして反転
+        const rs = [], gs = [], bs = [];
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+            if (!mask[(y - y0) * w + (x - x0)]) continue;
+            const o = (y * W + x) * 4;
+            rs.push(data[o]); gs.push(data[o + 1]); bs.push(data[o + 2]);
+        }
+        const med = (a) => { a.sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+        ring = { r: med(rs), g: med(gs), b: med(bs) };
+        ({ mask } = adaptiveMask(ring));
+        inverse = true;
+    }
+    // 縁に接する棒状成分（枠線・罫線・グラフ軸）を除去
+    const label = new Int32Array(w * h).fill(-1);
+    const comps = [];
+    const qx = new Int32Array(w * h), qy = new Int32Array(w * h);
+    for (let sy = 0; sy < h; sy++) for (let sx = 0; sx < w; sx++) {
+        if (!mask[sy * w + sx] || label[sy * w + sx] >= 0) continue;
+        const id = comps.length;
+        let head = 0, tail = 0;
+        qx[tail] = sx; qy[tail] = sy; tail++;
+        label[sy * w + sx] = id;
+        let bx0 = sx, bx1 = sx, by0 = sy, by1 = sy;
+        while (head < tail) {
+            const cx = qx[head], cy = qy[head]; head++;
+            if (cx < bx0) bx0 = cx; if (cx > bx1) bx1 = cx;
+            if (cy < by0) by0 = cy; if (cy > by1) by1 = cy;
+            if (cx > 0) { const o = cy * w + cx - 1; if (mask[o] && label[o] < 0) { label[o] = id; qx[tail] = cx - 1; qy[tail] = cy; tail++; } }
+            if (cx < w - 1) { const o = cy * w + cx + 1; if (mask[o] && label[o] < 0) { label[o] = id; qx[tail] = cx + 1; qy[tail] = cy; tail++; } }
+            if (cy > 0) { const o = (cy - 1) * w + cx; if (mask[o] && label[o] < 0) { label[o] = id; qx[tail] = cx; qy[tail] = cy - 1; tail++; } }
+            if (cy < h - 1) { const o = (cy + 1) * w + cx; if (mask[o] && label[o] < 0) { label[o] = id; qx[tail] = cx; qy[tail] = cy + 1; tail++; } }
+        }
+        comps.push({ id, bx0, bx1, by0, by1 });
+    }
+    const dropped = new Uint8Array(comps.length);
+    for (const c of comps) {
+        const cw = c.bx1 - c.bx0 + 1, ch = c.by1 - c.by0 + 1;
+        const touches = c.bx0 === 0 || c.by0 === 0 || c.bx1 === w - 1 || c.by1 === h - 1;
+        if (!touches) continue;
+        const barLike = (cw >= w * 0.95) || (ch >= h * 0.95) ||
+            (cw / ch > 6 && ch <= Math.max(3, h * 0.18)) ||
+            (ch / cw > 6 && cw <= Math.max(3, w * 0.08));
+        if (barLike) dropped[c.id] = 1;
+    }
+    const isInk = (x, y) => {
+        const lx = x - x0, ly = y - y0;
+        if (lx < 0 || ly < 0 || lx >= w || ly >= h) return false;
+        const o = ly * w + lx;
+        return mask[o] === 1 && !dropped[label[o]];
+    };
+    // 除去前の生マスク（枠線・罫線も含む）。写真判定で「文字以外の
+    // 構造物の縁」を地のテクスチャに数えないために使う
+    const isInkRaw = (x, y) => {
+        const lx = x - x0, ly = y - y0;
+        if (lx < 0 || ly < 0 || lx >= w || ly >= h) return false;
+        return mask[ly * w + lx] === 1;
+    };
+    return { isInk, isInkRaw, ring, x0, y0, x1, y1, inverse };
 }
 
-// 作業画像上の行を再描画照合する（piece / plate 共通）
-// 合格時は { w48, color, bold, ring } を返す
-async function verifyWorkLine(seg, rect, text, minCorr) {
-    let t = makeWorkInkTester(seg, rect);
-    const { workData: data, workW: W } = seg;
-    const w = t.x1 - t.x0, h = t.y1 - t.y0;
-    if (w <= 0 || h <= 0) return null;
+// インク判定から 2D グリッド（GH×GW のインク量）を作る。
+// bbox はノイズ耐性のためピーク比 4% 未満の縁の行・列を落として決める
+function inkGrid2d(isInk, x0, y0, x1, y1, GH, GW) {
+    const rw = x1 - x0, rh = y1 - y0;
+    if (rw <= 0 || rh <= 0) return null;
+    const rowSum = new Float64Array(rh), colSum = new Float64Array(rw);
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        if (!isInk(x, y)) continue;
+        rowSum[y - y0]++; colSum[x - x0]++;
+    }
+    let maxRow = 0, maxCol = 0;
+    for (const v of rowSum) maxRow = Math.max(maxRow, v);
+    for (const v of colSum) maxCol = Math.max(maxCol, v);
+    if (maxRow === 0) return null;
+    const rowThr = Math.max(1.9, maxRow * 0.04), colThr = Math.max(0.9, maxCol * 0.04);
+    let ry0 = 0, ry1 = rh - 1, rx0 = 0, rx1 = rw - 1;
+    while (ry0 < rh && rowSum[ry0] < rowThr) ry0++;
+    while (ry1 >= 0 && rowSum[ry1] < rowThr) ry1--;
+    while (rx0 < rw && colSum[rx0] < colThr) rx0++;
+    while (rx1 >= 0 && colSum[rx1] < colThr) rx1--;
+    if (ry1 < ry0 || rx1 < rx0) return null;
+    const bw = rx1 - rx0 + 1, bh = ry1 - ry0 + 1;
+    const grid = new Float64Array(GH * GW);
+    const cnt = new Float64Array(GH * GW);
+    for (let y = 0; y < bh; y++) {
+        const gy = Math.min(GH - 1, Math.floor(y / bh * GH));
+        for (let x = 0; x < bw; x++) {
+            const gx = Math.min(GW - 1, Math.floor(x / bw * GW));
+            cnt[gy * GW + gx]++;
+            if (isInk(x0 + rx0 + x, y0 + ry0 + y)) grid[gy * GW + gx]++;
+        }
+    }
+    for (let i = 0; i < GH * GW; i++) if (cnt[i] > 0) grid[i] /= cnt[i];
+    return { grid, w: bw, h: bh, bx0: x0 + rx0, by0: y0 + ry0, bx1: x0 + rx1 + 1, by1: y0 + ry1 + 1 };
+}
 
-    const interiorTopColor = () => {
-        // 行矩形の内部の最頻色（4bit 量子化）
-        const bins = new Map();
-        for (let y = t.y0; y < t.y1; y++) {
-            for (let x = t.x0; x < t.x1; x++) {
-                const o = (y * W + x) * 4;
-                const r = data[o], g = data[o + 1], b = data[o + 2];
-                const k = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-                let e = bins.get(k);
-                if (!e) bins.set(k, e = { n: 0, r: 0, g: 0, b: 0 });
-                e.n++; e.r += r; e.g += g; e.b += b;
+// 2 つのグリッドの相関（±1〜2 セルのずれを許容して最大値）
+function grid2dCorr(a, b, GH, GW) {
+    const pearson = (u, v) => {
+        const n = u.length;
+        let mu = 0, mv = 0;
+        for (let i = 0; i < n; i++) { mu += u[i]; mv += v[i]; }
+        mu /= n; mv /= n;
+        let cov = 0, vu = 0, vv = 0;
+        for (let i = 0; i < n; i++) { cov += (u[i] - mu) * (v[i] - mv); vu += (u[i] - mu) ** 2; vv += (v[i] - mv) ** 2; }
+        return (vu === 0 || vv === 0) ? 0 : cov / Math.sqrt(vu * vv);
+    };
+    let best = -1;
+    for (let sy = -1; sy <= 1; sy++) {
+        for (let sx = -2; sx <= 2; sx++) {
+            const u = [], v = [];
+            for (let y = 0; y < GH; y++) {
+                const yy = y + sy;
+                if (yy < 0 || yy >= GH) continue;
+                for (let x = 0; x < GW; x++) {
+                    const xx = x + sx;
+                    if (xx < 0 || xx >= GW) continue;
+                    u.push(a[y * GW + x]); v.push(b[yy * GW + xx]);
+                }
             }
-        }
-        let top = null;
-        for (const e of bins.values()) if (!top || e.n > top.n) top = e;
-        return top
-            ? { r: Math.round(top.r / top.n), g: Math.round(top.g / top.n), b: Math.round(top.b / top.n) }
-            : null;
-    };
-    const countInk = () => {
-        let n = 0;
-        for (let y = t.y0; y < t.y1; y++)
-            for (let x = t.x0; x < t.x1; x++) if (t.isInk(x, y)) n++;
-        return n;
-    };
-
-    // 白抜き行（暗い帯の上の白文字）: 行矩形が帯を覆っていると外周リングは
-    // 帯の外の色になり、帯全体が「インク」になってしまう。インクが過半なら
-    // 内部の最頻色（= 帯色）を下地にやり直す
-    if (countInk() > w * h * 0.55) {
-        const ring2 = interiorTopColor();
-        if (ring2) {
-            const isInk2 = (x, y) => {
-                if (x < 0 || y < 0 || x >= W || y >= seg.workH) return false;
-                const o = (y * W + x) * 4;
-                const d = Math.abs(data[o] - ring2.r) + Math.abs(data[o + 1] - ring2.g) + Math.abs(data[o + 2] - ring2.b);
-                return d > 70;
-            };
-            t = { ...t, isInk: isInk2, ring: ring2 };
+            best = Math.max(best, pearson(u, v));
         }
     }
+    return best;
+}
 
-    // 枠線対策: 幅の 9 割以上がインクの行（パネル罫線・帯の縁）は
-    // 文字ではないのでプロファイルから除外する
-    const rowExcluded = new Array(h).fill(false);
-    for (let y = 0; y < h; y++) {
-        let n = 0;
-        for (let x = t.x0; x < t.x1; x++) if (t.isInk(x, y + t.y0)) n++;
-        rowExcluded[y] = n > w * 0.9;
-    }
-    const isInk = (x, y) => !rowExcluded[y] && t.isInk(x + t.x0, y + t.y0);
+// テキストを描画して 2D グリッドにする（テキスト+太字ごとにキャッシュ）
+const renderGridCache = new Map();
+async function renderTextGrid(text, bold, GH, GW) {
+    const key = `${bold ? 'b' : 'n'}:${GH}x${GW}:${text}`;
+    if (renderGridCache.has(key)) return renderGridCache.get(key);
+    const fsPx = 36;
+    const w = Math.max(64, Math.ceil([...text].length * fsPx * 1.25) + 24), h = Math.round(fsPx * 1.9);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+        `<rect width="100%" height="100%" fill="white"/>` +
+        `<text x="8" y="${Math.round(fsPx * 1.25)}" font-family="Noto Sans CJK JP, Noto Sans JP, sans-serif"` +
+        ` font-size="${fsPx}" font-weight="${bold ? 700 : 400}" fill="black">${escapeXml(text)}</text></svg>`;
+    let out = null;
+    try {
+        const { data: d2, info: i2 } = await sharp(Buffer.from(svg))
+            .flatten({ background: '#ffffff' }).grayscale().raw()
+            .toBuffer({ resolveWithObject: true });
+        const isInk = (x, y) => d2[y * i2.width + x] < 128;
+        out = inkGrid2d(isInk, 0, 0, i2.width, i2.height, GH, GW);
+    } catch (e) { out = null; }
+    if (renderGridCache.size > 600) renderGridCache.clear();
+    renderGridCache.set(key, out);
+    return out;
+}
+
+// 作業画像上の行を 2D 形状照合する（piece / plate 共通）。
+// 常に計測値を返し、合否判定は呼び出し側のゲートが行う。
+// 戻り値: { corr, ratio, w48, bold, color, ring, inverse } / 計測不能時 null
+async function verifyWorkLine(seg, rect, text) {
+    const t = makeWorkInkTester(seg, rect);
+    const { workData: data, workW: W } = seg;
+    if (t.x1 - t.x0 <= 0 || t.y1 - t.y0 <= 0) return null;
 
     // インク画素の色と密度（テキスト色・太字判定に使う）
     let ir = 0, ig = 0, ib = 0, ink = 0, total = 0;
-    for (let y = 0; y < h; y++) {
-        if (rowExcluded[y]) continue;
-        for (let x = 0; x < w; x++) {
+    for (let y = t.y0; y < t.y1; y++) {
+        for (let x = t.x0; x < t.x1; x++) {
             total++;
-            if (!isInk(x, y)) continue;
-            const o = ((y + t.y0) * W + (x + t.x0)) * 4;
+            if (!t.isInk(x, y)) continue;
+            const o = (y * W + x) * 4;
             ir += data[o]; ig += data[o + 1]; ib += data[o + 2]; ink++;
         }
     }
     if (ink < 10) return null;
-    const bold = ink / Math.max(1, total) >= 0.22;
-    const orig = inkProfile(isInk, w, h);
-    const v = await verifyInkAgainstText(orig, text, bold, minCorr);
-    if (!v) return null;
+    const bold = ink / Math.max(1, total) >= 0.28;
+
+    // CJK フォントが無い環境では形状照合を諦める（ゲートは確信度側で判断）
+    if (/[⺀-鿿぀-ヿ]/.test(text) && !(await canRenderCjk())) {
+        return {
+            corr: null, ratio: 1, w48: null, bold,
+            color: { r: Math.round(ir / ink), g: Math.round(ig / ink), b: Math.round(ib / ink) },
+            ring: t.ring, inverse: t.inverse,
+        };
+    }
+
+    const GH = 16;
+    const aspect = (rect.x1 - rect.x0) / Math.max(1, rect.y1 - rect.y0);
+    const GW = Math.max(12, Math.min(120, Math.round(GH * aspect)));
+    const og = inkGrid2d(t.isInk, t.x0, t.y0, t.x1, t.y1, GH, GW);
+    if (!og) return null;
+    const rg = await renderTextGrid(text, bold, GH, GW);
+    if (!rg) return null;
+    const corr = grid2dCorr(og.grid, rg.grid, GH, GW);
+    const ratio = (rg.w / rg.h) / (og.w / og.h);
+    if (process.env.DECOMP_DEBUG) {
+        console.log(`  照合2D "${text.slice(0, 40)}" corr=${corr.toFixed(2)} ratio=${ratio.toFixed(2)} ` +
+            `orig=${og.w}x${og.h} rend=${rg.w}x${rg.h}${t.inverse ? ' inv' : ''}`);
+    }
     return {
-        w48: v.w48, bold,
+        corr, ratio, w48: Math.round(rg.w * 48 / 36), bold,
         color: { r: Math.round(ir / ink), g: Math.round(ig / ink), b: Math.round(ib / ink) },
-        ring: t.ring,
+        ring: t.ring, inverse: t.inverse, tester: t,
+        inkBox: { x0: og.bx0, y0: og.by0, x1: og.bx1, y1: og.by1 },
     };
+}
+
+// 行のインク画素が、どのパーツの不透明画素に載っているかを数える。
+// bbox の重なりではなく実画素で所有権を判定するため、
+// 「大きなイラストの bbox が行を覆っているだけ」の誤帰属が起きない
+function inkOwnership(tester, parts) {
+    const counts = new Map();
+    let inkTotal = 0;
+    for (let y = tester.y0; y < tester.y1; y++) {
+        for (let x = tester.x0; x < tester.x1; x++) {
+            if (!tester.isInk(x, y)) continue;
+            inkTotal++;
+            for (const p of parts) {
+                const lx = x - p.x, ly = y - p.y;
+                if (lx < 0 || ly < 0 || lx >= p.w || ly >= p.h) continue;
+                if (p.buf[(ly * p.w + lx) * 4 + 3] === 0) continue;
+                counts.set(p, (counts.get(p) || 0) + 1);
+            }
+        }
+    }
+    return { counts, inkTotal };
 }
 
 // 作業画像上で領域が丸バッジかどうか
@@ -1432,23 +1662,35 @@ function paintLineOnPlate(part, local, my = 3, bg = null) {
         for (let py = y0; py < y1; py += 2) { sample(x0 - 2, py); sample(x1 + 1, py); }
         bg = n > 0 ? { r: Math.round(sr / n), g: Math.round(sg / n), b: Math.round(sb / n) } : { r: 255, g: 255, b: 255 };
     }
-    // インクマスク（下地色から離れた画素）
+    // インクマスク（下地色から離れた画素）。しきい値は領域内の
+    // コントラストに適応させる（下地の淡い色味を誤ってインク扱いしない）
+    const dists = [];
+    for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+            const o = (y * part.w + x) * 4;
+            if (part.buf[o + 3] === 0) continue;
+            dists.push(Math.abs(part.buf[o] - bg.r) + Math.abs(part.buf[o + 1] - bg.g) + Math.abs(part.buf[o + 2] - bg.b));
+        }
+    }
+    if (dists.length === 0) return false;
+    const sorted = Array.from(dists).sort((a, b) => a - b);
+    const d95 = sorted[Math.floor(sorted.length * 0.95)];
+    const thr = Math.max(80, d95 * 0.45);
     const mask = new Uint8Array(W * H);
-    let ink = 0, total = 0;
+    let ink = 0, total = 0, di = 0;
     for (let y = y0; y < y1; y++) {
         for (let x = x0; x < x1; x++) {
             const o = (y * part.w + x) * 4;
             if (part.buf[o + 3] === 0) continue;
             total++;
-            const d = Math.abs(part.buf[o] - bg.r) + Math.abs(part.buf[o + 1] - bg.g) + Math.abs(part.buf[o + 2] - bg.b);
-            if (d > 80) { mask[(y - y0) * W + (x - x0)] = 1; ink++; }
+            if (dists[di++] > thr) { mask[(y - y0) * W + (x - x0)] = 1; ink++; }
         }
     }
     // この板にインクが無い（行の画素は別パーツにある）か、
     // ほぼ全面がインク（この板は行の下地層ではない）なら塗らない
     if (ink < 10 || ink > total * 0.85) return false;
-    // インク画素とその近傍 2px を下地色で塗る（AA のにじみも消す）
-    const R = 2;
+    // インク画素とその近傍 3px を下地色で塗る（圧縮のにじみも消す）
+    const R = 3;
     for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
             let hit = false;
@@ -1469,12 +1711,130 @@ function paintLineOnPlate(part, local, my = 3, bg = null) {
     return true;
 }
 
+// piece が「写真・商品画像」らしいか（コンパクトで色数が多い）
+function isPhotoLikePiece(part, imgArea) {
+    if (part._photoLike !== undefined) return part._photoLike;
+    const { buf, w, h } = part;
+    if (w * h > imgArea * 0.08) return (part._photoLike = false); // 大きすぎる部品は対象外
+    const bins = new Map();
+    let n = 0;
+    const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 4000)));
+    for (let y = 0; y < h; y += step) {
+        for (let x = 0; x < w; x += step) {
+            const o = (y * w + x) * 4;
+            if (buf[o + 3] === 0) continue;
+            const k = ((buf[o] >> 4) << 8) | ((buf[o + 1] >> 4) << 4) | (buf[o + 2] >> 4);
+            bins.set(k, (bins.get(k) || 0) + 1);
+            n++;
+        }
+    }
+    if (n < 200) return (part._photoLike = false);
+    let top1 = 0, distinct = 0;
+    for (const c of bins.values()) {
+        if (c > top1) top1 = c;
+        if (c >= n * 0.005) distinct++;
+    }
+    part._photoLike = (top1 / n) < 0.42 && distinct >= 14;
+    return part._photoLike;
+}
+
+// 行の下地が「写真」かどうかを、行の周囲のインク以外の画素の
+// テクスチャ（隣接画素差）で判定する。写真・商品パッケージの背景は
+// 細かな模様でざらつき、パネル・帯・グラデーションは滑らか
+function isPhotoBackdrop(seg, t) {
+    const { workData: data, workW: W } = seg;
+    // 文字エッジ周辺の圧縮ノイズ（リンギング）を拾わないよう、
+    // インクから 3px 以上離れた画素だけでテクスチャを測る
+    const w = t.x1 - t.x0, h = t.y1 - t.y0;
+    if (w <= 0 || h <= 0) return false;
+    const near = new Uint8Array(w * h);
+    const R = 3;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (!t.isInkRaw(x + t.x0, y + t.y0)) continue;
+            for (let dy = -R; dy <= R; dy++) {
+                const yy = y + dy;
+                if (yy < 0 || yy >= h) continue;
+                for (let dx = -R; dx <= R; dx++) {
+                    const xx = x + dx;
+                    if (xx >= 0 && xx < w) near[yy * w + xx] = 1;
+                }
+            }
+        }
+    }
+    let sum = 0, n = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 1; x < w; x++) {
+            if (near[y * w + x] || near[y * w + x - 1]) continue;
+            const o = ((y + t.y0) * W + (x + t.x0)) * 4, p = o - 4;
+            sum += Math.abs(data[o] - data[p]) + Math.abs(data[o + 1] - data[p + 1]) + Math.abs(data[o + 2] - data[p + 2]);
+            n++;
+        }
+    }
+    const mad = n > 0 ? sum / n : 0;
+    t._backdropMad = mad;
+    return n > 50 && mad > 26;
+}
+
+// ==== 最終整合（見た目の保証）====
+// 出力パーツを重ねた合成結果が元画像と一致しない画素は、テキスト化で
+// 意図的に消した領域（seg.erasedRects）を除き、最前面のパーツに元画素を
+// 書き戻す。分解や塗り消しのどこかで画素が失われても（例: 部品の bbox
+// からはみ出た画素の塗り消し）、最終的な見た目は必ず元画像と一致する
+export function reconcileParts(seg) {
+    const { workData, workW: W, workH: H } = seg;
+    const emitted = seg.parts.filter(p => !p.dropEmpty && (!p.textLines || p.keepImage));
+    if (emitted.length === 0) return;
+    const topIdx = new Int32Array(W * H).fill(-1);
+    const comp = Buffer.alloc(W * H * 4);
+    for (let i = 0; i < emitted.length; i++) {
+        const p = emitted[i];
+        for (let y = 0; y < p.h; y++) {
+            const gy = p.y + y;
+            if (gy < 0 || gy >= H) continue;
+            for (let x = 0; x < p.w; x++) {
+                const gx = p.x + x;
+                if (gx < 0 || gx >= W) continue;
+                const o = (y * p.w + x) * 4;
+                if (p.buf[o + 3] === 0) continue;
+                const g = (gy * W + gx) * 4;
+                comp[g] = p.buf[o]; comp[g + 1] = p.buf[o + 1]; comp[g + 2] = p.buf[o + 2]; comp[g + 3] = 255;
+                topIdx[gy * W + gx] = i;
+            }
+        }
+    }
+    const erased = new Uint8Array(W * H);
+    for (const r of (seg.erasedRects || [])) {
+        const x0 = Math.max(0, Math.floor(r.x0)), x1 = Math.min(W, Math.ceil(r.x1));
+        const y0 = Math.max(0, Math.floor(r.y0)), y1 = Math.min(H, Math.ceil(r.y1));
+        for (let y = y0; y < y1; y++) erased.fill(1, y * W + x0, y * W + x1);
+    }
+    let fixed = 0;
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const gi = y * W + x;
+            if (erased[gi]) continue;
+            const g = gi * 4;
+            const d = comp[g + 3] === 0
+                ? 999
+                : Math.abs(comp[g] - workData[g]) + Math.abs(comp[g + 1] - workData[g + 1]) + Math.abs(comp[g + 2] - workData[g + 2]);
+            if (d <= 60) continue;
+            const ti = topIdx[gi];
+            if (ti < 0) continue;
+            const p = emitted[ti];
+            const o = ((y - p.y) * p.w + (x - p.x)) * 4;
+            p.buf[o] = workData[g]; p.buf[o + 1] = workData[g + 1]; p.buf[o + 2] = workData[g + 2]; p.buf[o + 3] = 255;
+            fixed++;
+        }
+    }
+    if (process.env.DECOMP_DEBUG) console.log(`  整合復元: ${fixed}px`);
+}
+
 // PP-OCRv5 の全体認識結果をパーツ群に反映する
 async function ocrPartsPaddle(seg) {
     const rawLines = await runPaddle(seg);
     const pieces = seg.parts.filter(p => p.kind === 'piece');
     const plates = seg.parts.filter(p => p.kind === 'panel' || p.kind === 'backplate');
-    const bigLineH = seg.workH * 0.04; // 大きな見出しは照合を厳しめに
 
     // パーツごとの採用行・消し込み予約
     const partLines = new Map();   // part → [line(ローカル座標)]
@@ -1497,50 +1857,100 @@ async function ocrPartsPaddle(seg) {
         let rect = { x0: raw.x0, y0: raw.y0, x1: raw.x1, y1: raw.y1 };
         let text = raw.text;
 
-        // 行頭の丸バッジ（❶❷ⒶⒷ…が数字・英字として読まれる）: 円盤なら行から外して画像のまま残す
+        // 行全体が円盤（単独バッジ ❶Ⓐ 等）は画像のまま
+        if (/^[0-9①-⑳A-ZⒶ-Ⓩ]{1,2}$/.test(text) && isDiscLikeOnWork(seg, rect)) continue;
+
+        // ---- 形状計測 ----
+        // 行頭のバッジ（❶Ⓐ…が数字・英字として読まれる）やアイコンが
+        // 矩形に含まれている可能性があるため、「そのまま」と
+        // 「先頭を切り離した解釈」の両方を測り、相関が高い方を採用する
+        let v = await verifyWorkLine(seg, rect, text);
         const bm = text.match(/^([0-9①-⑳]{1,2})(?=[^0-9])/) ||
                    text.match(/^([A-ZⒶ-Ⓩ])(?=[^0-9A-Za-z])/);
         if (bm && isDiscLikeOnWork(seg, { ...rect, x1: rect.x0 + lineH * 1.1 })) {
-            text = text.slice(bm[1].length).replace(/^[\s:：]+/, '');
-            rect = { ...rect, x0: rect.x0 + lineH * 1.05 };
-            if (!text) continue;
-        }
-        // 行全体が円盤（単独バッジ）は画像のまま
-        if (/^[0-9①-⑳A-ZⒶ-Ⓩ]{1,2}$/.test(text) && isDiscLikeOnWork(seg, rect)) continue;
-
-        // 再描画照合。大見出しの誤字は目立つため厳格に。
-        // ごく短い行は照合の情報量が乏しく誤読が通りやすいので、同様に厳しくする
-        const contentChars = text.replace(/[\s、。，．・:：;；!！?？()（）［］「」『』/\\\-ー~〜]/g, '');
-        let minCorr = lineH > bigLineH ? 0.60 : 0.50;
-        if (contentChars.length <= 3) minCorr = Math.max(minCorr, 0.60);
-        // 長い行は 1 文字の違いでも縦横比・確信度に表れるため、
-        // 高確信度なら装飾フォントの分布ずれ（相関低下）を許容する
-        if (contentChars.length >= 12 && raw.conf >= 0.93) minCorr = Math.min(minCorr, 0.35);
-        let v = await verifyWorkLine(seg, rect, text, minCorr);
-        if (!v && !bm) {
-            // 行頭の図記号（アイコンや読み落とされたバッジ）が矩形に含まれて
-            // 照合を壊している場合: 先頭のインク群を最初の大きな空白で
-            // 切り離して再照合する。証拠を切り落としての再挑戦なので、
-            // 合格基準は一段厳しくする
+            // バッジ解釈: 先頭の数字・英字を落とし、矩形もバッジ分ずらす
+            const sText = text.slice(bm[1].length).replace(/^[\s:：.。、．]+/, '');
+            const sRect = { ...rect, x0: rect.x0 + lineH * 1.05 };
+            if (sText) {
+                const v2 = await verifyWorkLine(seg, sRect, sText);
+                // 元の解釈がすでにそこそこ合っているなら維持し、
+                // 明確に良くなるときだけバッジ解釈に切り替える
+                // 残りが十分長く、切り離し解釈でも形が立つなら
+                // バッジを画像のまま残す解釈を優先する
+                const better = v2 && v2.corr !== null && (
+                    ([...sText].length >= 3 && v2.corr >= 0.35) ||
+                    (!v || v.corr === null || (v.corr < 0.35 && v2.corr > v.corr + 0.15)));
+                if (better) { v = v2; rect = sRect; text = sText; }
+            }
+        } else if (!bm) {
             const stripped = stripLeadingGraphic(seg, rect);
             if (stripped) {
-                v = await verifyWorkLine(seg, stripped, text, Math.max(minCorr, 0.60));
-                if (v) rect = stripped;
+                const v2 = await verifyWorkLine(seg, stripped, text);
+                // テキストは同一なので、相関が良くなる方の矩形を採用
+                if (v2 && (!v || v2.corr === null || v.corr === null || v2.corr > v.corr)) {
+                    v = v2; rect = stripped;
+                }
             }
         }
-        if (!v) { dbg('照合棄却', raw); continue; }
+        if (!v) { dbg('照合不能', raw); continue; }
 
-        // 所有パーツ = 行と最も重なる piece
-        let owner = null, best = 0;
-        for (const p of pieces) {
-            const ov = overlapArea(rect, p);
-            if (ov > best) { best = ov; owner = p; }
+        // ---- 採用ゲート ----
+        // 主シグナルは「2 スケール読みの一致」(agree)。劣化画像の誤読は
+        // スケールに敏感で、正しい読みは安定していることを利用する。
+        // 装飾された下地では形状計測(corr/ratio)が不安定になるため、
+        // 高確信度帯では粗いサニティに留める。
+        const contentChars = text.replace(/[\s、。，．・:：;；!！?？()（）［］「」『』/\\\-ー~〜]/g, '');
+        const nChars = [...contentChars].length;
+        // 検出枠の切れ端（先頭が句読点・1文字だけ・和文の直後に
+        // 欧文1文字で終わる「値上f」のような尻切れ）はテキスト化しない
+        if (nChars <= 1 || /^[,，、。．.]/.test(text) ||
+            /[぀-ヿ⺀-鿿][a-zA-Z]$/.test(text)) { dbg('断片', raw); continue; }
+        let ok = false;
+        if (v.corr === null) {
+            // CJK フォントが無い環境: 確信度と一致だけで判断
+            ok = raw.agree && raw.conf >= 0.92;
+        } else if (!raw.agree) {
+            // 2 スケールで読みが割れた行は誤読の疑いが濃い。
+            // 形状が極めてよく一致する場合だけ救済する
+            ok = raw.conf >= 0.90 && v.corr >= 0.60 && v.ratio >= 0.75 && v.ratio <= 1.8;
+        } else if (nChars <= 2) {
+            // ごく短い行は情報量が乏しいので確信度を厳しめに
+            ok = raw.conf >= 0.97 && v.corr >= 0.05 && v.ratio >= 0.5 && v.ratio <= 2.4;
+        } else if (raw.conf >= 0.90) {
+            // 高確信度 + 2 スケール一致: 形状は異常検知のみ
+            ok = v.corr > -0.05 && v.ratio >= 0.45 && v.ratio <= 3.0;
+        } else if (raw.conf >= 0.80) {
+            ok = v.corr >= 0.15 && v.ratio >= 0.55 && v.ratio <= 2.6;
         }
+        if (!ok) { dbg(raw.agree ? '照合棄却' : '2スケール不一致', raw); continue; }
+
+        // 所有パーツ = 行のインク画素を実際に持っている piece（実画素で判定）
+        const nearby = pieces.filter(p => overlapArea(rect, p) > 0);
+        const { counts, inkTotal } = inkOwnership(v.tester, nearby);
+        let owner = null, ownCount = 0;
+        for (const [p, c] of counts) if (c > ownCount) { ownCount = c; owner = p; }
+        const ownFrac = inkTotal > 0 ? ownCount / inkTotal : 0;
         const rectArea = (rect.x1 - rect.x0) * (rect.y1 - rect.y0);
+
+        // 写真・商品パッケージの中に写り込んだ文字はテキスト化しない
+        // （写真から文字を消してフォントで置くと写真が壊れる）
+        // 所有pieceが写真的でも、行の下地がパネル系の色（白っぽい・淡い）
+        // なら「写真に隣接して連結しただけのキャプション」なので残す。
+        // 下地が鮮やか・暗い色のときだけ「写真の中の文字」と判定する
+        const ringSat = Math.max(v.ring.r, v.ring.g, v.ring.b) - Math.min(v.ring.r, v.ring.g, v.ring.b);
+        const ringLum = 0.3 * v.ring.r + 0.6 * v.ring.g + 0.1 * v.ring.b;
+        const ownerPhoto = owner && ownFrac >= 0.5 && isPhotoLikePiece(owner, seg.workW * seg.workH);
+        if (isPhotoBackdrop(seg, v.tester) ||
+            (ownerPhoto && (ringSat > 70 || ringLum < 90 ||
+             /^[\x20-\x7e]+$/.test(text) ||                 // 写真上の欧文ロゴ
+             (v.tester._backdropMad || 0) > 15))) {           // 写真上はテクスチャ閾値を下げる
+            dbg(`写真内テキスト mad=${(v.tester._backdropMad || 0).toFixed(0)}`, raw);
+            continue;
+        }
 
         // ---- テキストボックスをどのパーツに帰属させるか決める ----
         let attachTo = null, mode = 'normal';
-        if (owner && best >= rectArea * 0.5) {
+        if (owner && ownFrac >= 0.5) {
             attachTo = owner;
             mode = owner.stats && owner.stats.coreFillRatio > 0.55 ? 'inverse' : 'normal';
         } else {
@@ -1556,6 +1966,11 @@ async function ocrPartsPaddle(seg) {
             mode = 'plate';
         }
 
+        // テキストボックスの位置・大きさと消し込み範囲は、検出枠ではなく
+        // 実際のインク bbox（余白トリム済み）を使う。検出枠は認識のために
+        // 左右へ広げてあるため、そのまま使うと文字box が大きく・ずれて出る
+        if (v.inkBox) rect = { ...v.inkBox };
+
         // ---- 消し込みは「行と重なる全パーツ」に対して行う ----
         // 行の画素がどのパーツ（piece / パネル / 背景板）に属していても
         // 確実に消えるようにする。帰属パーツの推定は bbox ベースなので、
@@ -1564,18 +1979,19 @@ async function ocrPartsPaddle(seg) {
         // OCR の検出枠は字面よりわずかに狭いことがあるので、
         // 行高に応じた余白を付けて消し残しを防ぐ
         const clr = {
-            x0: rect.x0 - 2, x1: rect.x1 + 2,
-            y0: rect.y0 - Math.max(3, lineH * 0.15),
-            y1: rect.y1 + Math.max(3, lineH * 0.15),
+            x0: rect.x0 - 6, x1: rect.x1 + 6,
+            y0: rect.y0 - Math.max(6, lineH * 0.2),
+            y1: rect.y1 + Math.max(6, lineH * 0.2),
         };
-        for (const p of pieces) {
-            if (overlapArea(clr, p) <= 0) continue;
-            addTo(clearPlan, p, {
-                x0: clr.x0 - p.x, y0: clr.y0 - p.y,
-                x1: clr.x1 - p.x, y1: clr.y1 - p.y,
-            });
+        // 最終整合（reconcileParts）が「意図して消した領域」を
+        // 復元しないように記録しておく
+        (seg.erasedRects = seg.erasedRects || []).push({ ...clr });
+        if (process.env.DECOMP_CLRDBG) console.log(`  clr ${Math.round(clr.x0)},${Math.round(clr.y0)}-${Math.round(clr.x1)},${Math.round(clr.y1)} "${text.slice(0,14)}"`);
+        for (const p of nearby) {
+            if ((counts.get(p) || 0) < 5) continue;  // 行のインクを実際に持つ piece だけ消す
+            addTo(clearPlan, p, { ...clr, isInk: v.tester.isInk });
         }
-        const paintMy = Math.max(3, Math.round(lineH * 0.15));
+        const paintMy = Math.max(6, Math.round(lineH * 0.2));
         for (const p of plates) {
             if (overlapArea(clr, p) <= 0) continue;
             paintLineOnPlate(p, {
@@ -1584,6 +2000,7 @@ async function ocrPartsPaddle(seg) {
             }, paintMy, v.ring);
         }
 
+        if (process.env.DECOMP_DEBUG) console.log(`  採用 mad=${(v.tester._backdropMad||0).toFixed(0)} conf=${raw.conf} "${text.slice(0,25)}"`);
         addTo(partLines, attachTo, {
             text,
             x0: rect.x0 - attachTo.x, y0: rect.y0 - attachTo.y,
@@ -1607,7 +2024,7 @@ async function ocrPartsPaddle(seg) {
             part.keepImage = true; // 白抜きは fillHoles 済み。透過クリアすると帯に穴が開くので残す
             continue;
         }
-        const remain = clearLines(part, rects); // 採用行の画素を透明化。残インクの有無を返す
+        const remain = clearInkMasks(part, rects); // 採用行のインク画素だけ透明化。残インクの有無を返す
         if (own.length > 0) {
             part.keepImage = remain;            // バッジ等が残っていれば画像も出す
         } else if (!remain) {
@@ -1777,7 +2194,8 @@ function textboxXml(line, id, x, y, cx, cy) {
     // 長体（横に潰した文字）対策: フォントの自然幅が枠幅を超える場合は
     // 幅に収まるサイズまで縮める（照合時に測った描画幅を使う）
     if (line.natW48) {
-        const ptForWidth = (cx * 48) / (12700 * line.natW48);
+        // Meiryo UI と計測フォント(Noto)の幅差を吸収する安全係数
+        const ptForWidth = (cx * 48) / (12700 * line.natW48) * 0.96;
         pt = Math.min(pt, ptForWidth);
     }
     pt = Math.max(5, Math.min(90, pt));
@@ -1853,6 +2271,10 @@ async function processSlide(zip, slidePath, slideW, slideH, state, options) {
         if (options.ocr) {
             try { await ocrParts(seg); } catch (e) { console.warn(`🔤 OCR をスキップ: ${e.message}`); }
         }
+
+        // 最終整合: 出力パーツの合成が元画像と一致するよう欠損画素を復元する
+        // （テキスト化で意図的に消した領域は除く）
+        try { reconcileParts(seg); } catch (e) { console.warn(`🧩 整合復元をスキップ: ${e.message}`); }
 
         // ピクセル座標 → EMU 座標のスケール
         const sx = extCx / seg.workW, sy = extCy / seg.workH;
