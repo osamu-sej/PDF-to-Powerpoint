@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const JSZip = require('jszip');
 import { fileURLToPath } from 'url';
 import { decomposeFlatImages } from './decompose.js';
+import { refinePptx, auditPptx, buildDeliveryNote } from './refine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -876,8 +877,52 @@ async function convertToPptx({ route, inputPath, workDir, options }) {
             console.warn(`🧩 一枚絵分解をスキップ（変換自体は継続）: ${e.message}`);
         }
     }
-    return pptxPath;
+
+    // うちた式パワポ変換 V1.5 の要件を適用する（線→コネクタ化・矢尻統合・破線・フォント対・右マージン）。
+    // 一枚絵分解の後に実行する。失敗しても従来の変換結果をそのまま返す（ファイルは書き換えない）
+    let refineStats = null;
+    if (options.refineMode !== 'off') {
+        try {
+            refineStats = await refinePptx(pptxPath, { fontMode: options.fontMode });
+        } catch (e) {
+            console.warn(`🔧 V1.5 後処理をスキップ（変換自体は継続）: ${e.message}`);
+        }
+    }
+
+    // 出力した PPTX を読み戻して機械検品し、納品メモ（4 見出し）を作る
+    let report = null;
+    try {
+        const audit = await auditPptx(pptxPath);
+        report = { audit, refine: refineStats, route };
+    } catch (e) {
+        console.warn(`📋 機械検品をスキップ: ${e.message}`);
+    }
+    return { pptxPath, report };
 }
+
+// 納品メモの一時保管（変換ごとに ID を発行し、一定時間だけメモリに保持する）
+const REPORTS = new Map(); // id → { createdAt, fileName, markdown, json }
+const REPORT_TTL_MS = 60 * 60 * 1000;
+const REPORT_MAX = 100;
+
+function saveReport({ fileName, report }) {
+    if (!report) return null;
+    const now = Date.now();
+    for (const [k, v] of REPORTS) if (now - v.createdAt > REPORT_TTL_MS) REPORTS.delete(k);
+    while (REPORTS.size >= REPORT_MAX) REPORTS.delete(REPORTS.keys().next().value);
+    const id = crypto.randomUUID();
+    const markdown = buildDeliveryNote({ fileName, version: APP_VERSION, refine: report.refine, audit: report.audit, route: report.route });
+    REPORTS.set(id, { createdAt: now, fileName, markdown, json: { fileName, version: APP_VERSION, ...report } });
+    return id;
+}
+
+// GET /report/:id → 納品メモ（既定 Markdown。?format=json で機械検品の生データ）
+app.get('/report/:id', (req, res) => {
+    const r = REPORTS.get(req.params.id);
+    if (!r) return res.status(404).send('Report not found or expired.');
+    if (req.query.format === 'json') return res.json(r.json);
+    res.type('text/markdown; charset=utf-8').send(r.markdown);
+});
 
 // リクエストから変換オプションを取り出す
 function parseOptions(body = {}) {
@@ -887,6 +932,8 @@ function parseOptions(body = {}) {
         sizeMode: body.sizeMode === 'shrink' ? 'shrink' : 'keep',
         decomposeMode: body.decomposeMode === 'off' ? 'off'
             : body.decomposeMode === 'parts' ? 'parts' : 'auto',
+        // V1.5 後処理（コネクタ化など）。既定は有効
+        refineMode: body.refineMode === 'off' ? 'off' : 'on',
     };
 }
 
@@ -922,12 +969,15 @@ app.post('/convert', upload.any(), async (req, res) => {
     try {
         console.log(`📥 受信: ${originalName} (${route})`);
         const options = parseOptions(req.body);
-        const pptxPath = await convertToPptx({ route, inputPath: renamedInput, workDir, options });
+        const { pptxPath, report } = await convertToPptx({ route, inputPath: renamedInput, workDir, options });
 
         // ★履歴保存（バックアップ）実行
         recordHistory(renamedInput, originalName);
 
         const downloadName = `${originalName.replace(/\.[^.]+$/, '')}.pptx`;
+        // 納品メモの ID をヘッダで返す（画面側が /report/:id を開ける）
+        const reportId = saveReport({ fileName: downloadName, report });
+        if (reportId) res.setHeader('X-Report-Id', reportId);
         res.download(pptxPath, downloadName, () => cleanup(pptxPath));
     } catch (error) {
         console.error('Error:', error.message, error.stderr || '');

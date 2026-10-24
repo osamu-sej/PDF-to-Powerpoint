@@ -440,6 +440,11 @@
                     <label><input type="radio" name="decomposeMode" value="parts"> 分解のみ（文字も画像のまま）</label>
                     <label><input type="radio" name="decomposeMode" value="off"> 分解しない</label>
                 </div>
+                <div class="opt-group">
+                    <span class="opt-label">編集性の後処理（うちた式 V1.5）</span>
+                    <label><input type="radio" name="refineMode" value="on" checked> 線をコネクタ化・矢尻統合・破線/フォント整備（推奨）</label>
+                    <label><input type="radio" name="refineMode" value="off"> 適用しない</label>
+                </div>
             </details>
 
             <div class="progress-section" id="progressSection">
@@ -538,6 +543,7 @@
             const fontMode = form.querySelector('input[name="fontMode"]:checked').value;
             const sizeMode = form.querySelector('input[name="sizeMode"]:checked').value;
             const decomposeMode = form.querySelector('input[name="decomposeMode"]:checked').value;
+            const refineMode = form.querySelector('input[name="refineMode"]:checked').value;
 
             // UIの切り替え（ボタン非表示、バー表示）
             submitBtn.disabled = true;
@@ -599,6 +605,7 @@
                 formData.append('fontMode', fontMode);
                 formData.append('sizeMode', sizeMode);
                 formData.append('decomposeMode', decomposeMode);
+                formData.append('refineMode', refineMode);
                 const response = await fetch('/convert', {
                     method: 'POST',
                     body: formData
@@ -635,10 +642,23 @@
                 a.remove();
                 window.URL.revokeObjectURL(url);
 
-                // 5秒後に画面リロード
+                // 納品メモ（機械検品の実測値・エッジ表・要確認箇所）へのリンクを出す
+                const reportId = response.headers.get('X-Report-Id');
+                let reloadAfter = 5000;
+                if (reportId) {
+                    const link = document.createElement('a');
+                    link.href = '/report/' + encodeURIComponent(reportId);
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    link.textContent = '📋 納品メモ（機械検品の結果）を開く';
+                    link.style.cssText = 'display:block;margin-top:10px;font-size:0.9rem;color:var(--primary);';
+                    statusMsg.after(link);
+                    reloadAfter = 30000; // メモを開く時間を確保してからリロード
+                }
+
                 setTimeout(() => {
                     window.location.reload();
-                }, 5000);
+                }, reloadAfter);
 
             } catch (err) {
                 clearInterval(timer);
